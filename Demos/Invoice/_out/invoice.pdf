@@ -1,0 +1,535 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R>>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding>>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding>>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding>>
+endobj
+6 0 obj
+<< /Length 5264>>
+stream
+q
+0.173 0.408 0.69 rg
+65 791 m
+73.284 791 80 784.284 80 776 c
+80 767.716 73.284 761 65 761 c
+56.716 761 50 767.716 50 776 c
+50 784.284 56.716 791 65 791 c
+h
+f*
+Q
+q
+0.863 0.471 0.157 rg
+83 791 m
+91.284 791 98 784.284 98 776 c
+98 767.716 91.284 761 83 761 c
+74.716 761 68 767.716 68 776 c
+68 784.284 74.716 791 83 791 c
+h
+f*
+Q
+q
+0.188 0.627 0.282 rg
+101 791 m
+109.284 791 116 784.284 116 776 c
+116 767.716 109.284 761 101 761 c
+92.716 761 86 767.716 86 776 c
+86 784.284 92.716 791 101 791 c
+h
+f*
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F1 22 Tf
+1 0 0 1 130 775 Tm
+(Acme Trifecta Co.) Tj
+ET
+Q
+q
+0.502 0.502 0.502 rg
+BT
+/F2 10 Tf
+1 0 0 1 132 754 Tm
+(Three things, done well, every time.) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 444 783 Tm
+(123 Threefold Lane) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 441 769 Tm
+(Edinburgh EH1 1AA) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 451 755 Tm
+(+44 131 555 0100) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 398 741 Tm
+(hello@acmetrifecta.example) Tj
+ET
+Q
+q
+0.753 0.753 0.753 RG
+0.5 w
+[] 0 d
+0 J
+0 j
+50 711 m
+545 711 l
+S
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F1 32 Tf
+1 0 0 1 50 668 Tm
+(INVOICE) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 418 681 Tm
+(Invoice #) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 489 681 Tm
+(2026-0042) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 411 665 Tm
+(Issue date) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 484 665 Tm
+(1 May 2026) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 418 649 Tm
+(Due date) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 478 649 Tm
+(31 May 2026) Tj
+ET
+Q
+q
+0.502 0.502 0.502 rg
+BT
+/F1 9 Tf
+1 0 0 1 50 605 Tm
+(BILL TO) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11 Tf
+1 0 0 1 50 587 Tm
+(Cozmix Software Ltd.) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11 Tf
+1 0 0 1 50 573 Tm
+(Attn: Steve Maughan) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11 Tf
+1 0 0 1 50 559 Tm
+(1 Holyrood Road) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11 Tf
+1 0 0 1 50 545 Tm
+(Edinburgh EH8 8AS) Tj
+ET
+Q
+q
+0.188 0.251 0.376 rg
+50 499 495 22 re
+f*
+Q
+q
+1 1 1 rg
+BT
+/F1 9 Tf
+1 0 0 1 60 509 Tm
+(DESCRIPTION) Tj
+ET
+Q
+q
+1 1 1 rg
+BT
+/F1 9 Tf
+1 0 0 1 340 509 Tm
+(QTY) Tj
+ET
+Q
+q
+1 1 1 rg
+BT
+/F1 11.667 Tf
+1 0 0 1 433 507 Tm
+(UNIT) Tj
+ET
+Q
+q
+1 1 1 rg
+BT
+/F1 11.667 Tf
+1 0 0 1 506 507 Tm
+(TOTAL) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 60 482 Tm
+(Phase 1 - Foundation \(writer, geometry, page skeleton\)) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 340 482 Tm
+(1) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 411 481 Tm
+($1200.00) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 496 481 Tm
+($1200.00) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 60 460 Tm
+(Phase 2 - Graphics primitives \(lines, polygons, clip\)) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 340 460 Tm
+(1) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 418 459 Tm
+($800.00) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 503 459 Tm
+($800.00) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 60 438 Tm
+(Phase 3 - Standard 14 fonts + paragraph layout) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 340 438 Tm
+(1) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 418 437 Tm
+($900.00) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 503 437 Tm
+($900.00) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 60 416 Tm
+(Phase 4 - TrueType embedding \(Win registry lookup\)) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 340 416 Tm
+(1) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 411 415 Tm
+($1500.00) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 496 415 Tm
+($1500.00) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 60 394 Tm
+(Phase 5 - JPEG / PNG / BMP / SMask images) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 340 394 Tm
+(1) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 411 393 Tm
+($1000.00) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 496 393 Tm
+($1000.00) Tj
+ET
+Q
+q
+0.753 0.753 0.753 RG
+0.5 w
+[] 0 d
+0 J
+0 j
+380 373 m
+545 373 l
+S
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 417 357 Tm
+(Subtotal) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 496 357 Tm
+($5400.00) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 411 341 Tm
+(VAT 20%) Tj
+ET
+Q
+q
+0.251 0.251 0.251 rg
+BT
+/F3 11.667 Tf
+1 0 0 1 496 341 Tm
+($1080.00) Tj
+ET
+Q
+q
+0.188 0.251 0.376 rg
+380 305 165 26 re
+f*
+Q
+q
+1 1 1 rg
+BT
+/F1 13.333 Tf
+1 0 0 1 416 317 Tm
+(TOTAL) Tj
+ET
+Q
+q
+1 1 1 rg
+BT
+/F1 13.333 Tf
+1 0 0 1 489 317 Tm
+($6480.00) Tj
+ET
+Q
+q
+0.502 0.502 0.502 rg
+BT
+/F1 9 Tf
+1 0 0 1 50 241 Tm
+(NOTES) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 50 224 Tm
+(Payment is due within 30 days of the issue date by bank transfer to GB29 NWBK 6016 1331 9268 19. Please) Tj
+ET
+Q
+q
+0.188 0.188 0.188 rg
+BT
+/F3 10 Tf
+1 0 0 1 50 212 Tm
+(reference invoice 2026-0042 in the transfer description. Late payments accrue 2% interest per month.) Tj
+ET
+Q
+q
+0.753 0.753 0.753 RG
+0.5 w
+[] 0 d
+0 J
+0 j
+50 49 m
+545 49 l
+S
+Q
+q
+0.502 0.502 0.502 rg
+BT
+/F2 8 Tf
+1 0 0 1 50 33 Tm
+(Acme Trifecta Co. ó Registered in Scotland SC123456 ó VAT GB123456789) Tj
+ET
+Q
+q
+0.502 0.502 0.502 rg
+BT
+/F2 11.667 Tf
+1 0 0 1 485 31 Tm
+(Page 1 of 1) Tj
+ET
+Q
+
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R>>>> /Contents 6 0 R>>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [7 0 R] /Count 1>>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000005822 00000 n 
+0000000063 00000 n 
+0000000164 00000 n 
+0000000268 00000 n 
+0000000364 00000 n 
+0000005679 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R>>
+startxref
+5878
+%%EOF
