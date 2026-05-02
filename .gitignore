@@ -1,0 +1,6 @@
+Claude.md
+*.dcu
+*.ps1
+__history/
+__recovery/
+.claude/
