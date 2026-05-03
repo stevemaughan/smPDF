@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="smPDF" tests="272" failures="0" errors="0" time="0.541">
+<testsuite name="smPDF" tests="277" failures="0" errors="0" time="0.640">
   <testcase classname="TGeometryTests" name="Test_PixelsToPoints_72dpi_isIdentity" time="0.000" />
   <testcase classname="TGeometryTests" name="Test_PixelsToPoints_300dpi_oneInch" time="0.000" />
   <testcase classname="TGeometryTests" name="Test_PixelsToPoints_96dpi_arbitrary" time="0.000" />
@@ -89,28 +89,28 @@
   <testcase classname="TPageTests" name="Test_Emit_withoutFontMap_omitsFontResourceDict" time="0.000" />
   <testcase classname="TPageTests" name="Test_Emit_withFontIdsAndUsedFonts_emitsFontDict" time="0.000" />
   <testcase classname="TDrawingTests" name="Test_DrawLine_emitsMoveLineStroke" time="0.003" />
-  <testcase classname="TDrawingTests" name="Test_DrawLine_setsStrokeColorFromPen" time="0.003" />
-  <testcase classname="TDrawingTests" name="Test_DrawLine_setsLineWidth" time="0.003" />
-  <testcase classname="TDrawingTests" name="Test_DrawLine_penNone_emitsNothing" time="0.003" />
-  <testcase classname="TDrawingTests" name="Test_DrawLine_dashedPen_emitsDashArray" time="0.003" />
-  <testcase classname="TDrawingTests" name="Test_DrawBox_strokeAndFill_emitsBStar" time="0.002" />
+  <testcase classname="TDrawingTests" name="Test_DrawLine_setsStrokeColorFromPen" time="0.002" />
+  <testcase classname="TDrawingTests" name="Test_DrawLine_setsLineWidth" time="0.002" />
+  <testcase classname="TDrawingTests" name="Test_DrawLine_penNone_emitsNothing" time="0.011" />
+  <testcase classname="TDrawingTests" name="Test_DrawLine_dashedPen_emitsDashArray" time="0.002" />
+  <testcase classname="TDrawingTests" name="Test_DrawBox_strokeAndFill_emitsBStar" time="0.010" />
   <testcase classname="TDrawingTests" name="Test_DrawBox_strokeOnly_emitsStroke" time="0.003" />
-  <testcase classname="TDrawingTests" name="Test_DrawBox_fillOnly_emitsFillEvenOdd" time="0.013" />
+  <testcase classname="TDrawingTests" name="Test_DrawBox_fillOnly_emitsFillEvenOdd" time="0.011" />
   <testcase classname="TDrawingTests" name="Test_DrawBox_neitherStrokeNorFill_emitsNothing" time="0.002" />
-  <testcase classname="TDrawingTests" name="Test_DrawBox_emitsRectangleOperator" time="0.003" />
-  <testcase classname="TDrawingTests" name="Test_DrawOval_emitsFourCurveOperators" time="0.002" />
+  <testcase classname="TDrawingTests" name="Test_DrawBox_emitsRectangleOperator" time="0.001" />
+  <testcase classname="TDrawingTests" name="Test_DrawOval_emitsFourCurveOperators" time="0.001" />
   <testcase classname="TDrawingTests" name="Test_DrawOval_solidPenClearBrush_emitsStroke" time="0.002" />
-  <testcase classname="TDrawingTests" name="Test_DrawMultiLine_emitsMoveAndLines" time="0.012" />
-  <testcase classname="TDrawingTests" name="Test_DrawMultiLine_emitsStrokeNotFill" time="0.003" />
+  <testcase classname="TDrawingTests" name="Test_DrawMultiLine_emitsMoveAndLines" time="0.002" />
+  <testcase classname="TDrawingTests" name="Test_DrawMultiLine_emitsStrokeNotFill" time="0.010" />
   <testcase classname="TDrawingTests" name="Test_DrawMultiLine_singlePoint_emitsNothing" time="0.002" />
   <testcase classname="TDrawingTests" name="Test_DrawPolygon_singleSquare_emitsOneClose" time="0.002" />
   <testcase classname="TDrawingTests" name="Test_DrawPolygon_squareWithSquareHole_emitsTwoCloses" time="0.002" />
-  <testcase classname="TDrawingTests" name="Test_DrawPolygon_unclosedFinalSubpath_isAutoClosed" time="0.003" />
+  <testcase classname="TDrawingTests" name="Test_DrawPolygon_unclosedFinalSubpath_isAutoClosed" time="0.001" />
   <testcase classname="TDrawingTests" name="Test_DrawPolygon_consecutiveDuplicateOfStart_doesNotPrematurelyClose" time="0.002" />
   <testcase classname="TDrawingTests" name="Test_DrawPolygon_usesEvenOddFillRule" time="0.002" />
-  <testcase classname="TDrawingTests" name="Test_DrawPolygon_strokeOnly_emitsStrokeWithoutFill" time="0.012" />
-  <testcase classname="TDrawingTests" name="Test_DrawPolygonClipped_emitsClipBeforePath" time="0.003" />
-  <testcase classname="TDrawingTests" name="Test_DrawPolygonClipped_emitsTwoQOperators" time="0.003" />
+  <testcase classname="TDrawingTests" name="Test_DrawPolygon_strokeOnly_emitsStrokeWithoutFill" time="0.002" />
+  <testcase classname="TDrawingTests" name="Test_DrawPolygonClipped_emitsClipBeforePath" time="0.012" />
+  <testcase classname="TDrawingTests" name="Test_DrawPolygonClipped_emitsTwoQOperators" time="0.009" />
   <testcase classname="TFontTests" name="Test_Resolve_HelveticaPlain" time="0.000" />
   <testcase classname="TFontTests" name="Test_Resolve_HelveticaBold" time="0.000" />
   <testcase classname="TFontTests" name="Test_Resolve_HelveticaItalic" time="0.000" />
@@ -144,33 +144,33 @@
   <testcase classname="TFontTests" name="Test_StringToWinAnsi_unmappedBecomesQuestionMark" time="0.000" />
   <testcase classname="TFontTests" name="Test_StringToWinAnsi_emptyString" time="0.000" />
   <testcase classname="TTextTests" name="Test_DrawText_emitsBeginTextEndText" time="0.003" />
-  <testcase classname="TTextTests" name="Test_DrawText_emitsTfWithFontResourceAndSize" time="0.003" />
+  <testcase classname="TTextTests" name="Test_DrawText_emitsTfWithFontResourceAndSize" time="0.002" />
   <testcase classname="TTextTests" name="Test_DrawText_emitsTjWithEscapedString" time="0.002" />
   <testcase classname="TTextTests" name="Test_DrawText_emitsTextMatrix" time="0.002" />
-  <testcase classname="TTextTests" name="Test_DrawText_emptyStringEmitsNothing" time="0.003" />
+  <testcase classname="TTextTests" name="Test_DrawText_emptyStringEmitsNothing" time="0.001" />
   <testcase classname="TTextTests" name="Test_FontDict_emittedForHelveticaUsage" time="0.002" />
-  <testcase classname="TTextTests" name="Test_FontDict_includesWinAnsiEncodingForLatinFonts" time="0.015" />
-  <testcase classname="TTextTests" name="Test_FontDict_omitsEncodingForSymbol" time="0.005" />
-  <testcase classname="TTextTests" name="Test_BoldItalic_resolvesToBoldObliquePdfName" time="0.019" />
+  <testcase classname="TTextTests" name="Test_FontDict_includesWinAnsiEncodingForLatinFonts" time="0.002" />
+  <testcase classname="TTextTests" name="Test_FontDict_omitsEncodingForSymbol" time="0.002" />
+  <testcase classname="TTextTests" name="Test_BoldItalic_resolvesToBoldObliquePdfName" time="0.009" />
   <testcase classname="TTextTests" name="Test_TimesBoldItalic_resolvesToBoldItalicPdfName" time="0.003" />
-  <testcase classname="TTextTests" name="Test_TwoFontsSamePage_getDistinctResourceAliases" time="0.003" />
-  <testcase classname="TTextTests" name="Test_SameFontTwice_reusesSameResource" time="0.004" />
-  <testcase classname="TTextTests" name="Test_TextFill_usesFontColor" time="0.003" />
+  <testcase classname="TTextTests" name="Test_TwoFontsSamePage_getDistinctResourceAliases" time="0.009" />
+  <testcase classname="TTextTests" name="Test_SameFontTwice_reusesSameResource" time="0.002" />
+  <testcase classname="TTextTests" name="Test_TextFill_usesFontColor" time="0.002" />
   <testcase classname="TTextTests" name="Test_DrawText_leftAlignedInRect_xEqualsRectLeft" time="0.003" />
-  <testcase classname="TTextTests" name="Test_DrawText_rightAlignedInRect_textEndsAtRectRight" time="0.003" />
-  <testcase classname="TTextTests" name="Test_DrawText_centerAlignedInRect_textCentered" time="0.019" />
-  <testcase classname="TTextTests" name="Test_DrawText_inRect_autoSizesToFitHeight" time="0.005" />
-  <testcase classname="TTextTests" name="Test_DrawText_inRect_doublingRectDoublesFontSize" time="0.029" />
-  <testcase classname="TTextTests" name="Test_DrawParagraph_singleLineFits_emitsOneTj" time="0.003" />
-  <testcase classname="TTextTests" name="Test_DrawParagraph_longTextWrapsToMultipleLines" time="0.017" />
-  <testcase classname="TTextTests" name="Test_DrawParagraph_padding_doubleProducesGreaterLineHeight" time="0.008" />
-  <testcase classname="TTextTests" name="Test_Underline_emitsStrokeBesidesText" time="0.004" />
+  <testcase classname="TTextTests" name="Test_DrawText_rightAlignedInRect_textEndsAtRectRight" time="0.004" />
+  <testcase classname="TTextTests" name="Test_DrawText_centerAlignedInRect_textCentered" time="0.003" />
+  <testcase classname="TTextTests" name="Test_DrawText_inRect_autoSizesToFitHeight" time="0.012" />
+  <testcase classname="TTextTests" name="Test_DrawText_inRect_doublingRectDoublesFontSize" time="0.005" />
+  <testcase classname="TTextTests" name="Test_DrawParagraph_singleLineFits_emitsOneTj" time="0.011" />
+  <testcase classname="TTextTests" name="Test_DrawParagraph_longTextWrapsToMultipleLines" time="0.002" />
+  <testcase classname="TTextTests" name="Test_DrawParagraph_padding_doubleProducesGreaterLineHeight" time="0.003" />
+  <testcase classname="TTextTests" name="Test_Underline_emitsStrokeBesidesText" time="0.013" />
   <testcase classname="TTextTests" name="Test_Underline_disabled_emitsOnlyText" time="0.003" />
-  <testcase classname="TTextTests" name="Test_StrokeStyle_isOff_byDefault" time="0.003" />
-  <testcase classname="TTextTests" name="Test_StrokeStyle_None_emitsNoTextRenderingMode" time="0.004" />
-  <testcase classname="TTextTests" name="Test_StrokeStyle_Medium_emitsFillAndStrokeMode" time="0.004" />
-  <testcase classname="TTextTests" name="Test_StrokeStyle_setsStrokeColorAndWidth" time="0.004" />
-  <testcase classname="TTextTests" name="Test_StrokeStyle_widthScalesByStyle" time="0.008" />
+  <testcase classname="TTextTests" name="Test_StrokeStyle_isOff_byDefault" time="0.002" />
+  <testcase classname="TTextTests" name="Test_StrokeStyle_None_emitsNoTextRenderingMode" time="0.002" />
+  <testcase classname="TTextTests" name="Test_StrokeStyle_Medium_emitsFillAndStrokeMode" time="0.013" />
+  <testcase classname="TTextTests" name="Test_StrokeStyle_setsStrokeColorAndWidth" time="0.002" />
+  <testcase classname="TTextTests" name="Test_StrokeStyle_widthScalesByStyle" time="0.017" />
   <testcase classname="TTextTests" name="Test_TextWidth_emptyStringIsZero" time="0.000" />
   <testcase classname="TTextTests" name="Test_TextWidth_nonEmptyIsPositive" time="0.000" />
   <testcase classname="TTextTests" name="Test_TextWidth_scalesWithSize" time="0.000" />
@@ -183,16 +183,16 @@
   <testcase classname="TTextTests" name="Test_MeasureParagraph_doubleSpacingDoublesHeight" time="0.000" />
   <testcase classname="TTextTests" name="Test_MeasureParagraph_emptyTextReturnsZero" time="0.000" />
   <testcase classname="TTextTests" name="Test_TextWidth_beforeNewPage_raisesEPDFError" time="0.000" />
-  <testcase classname="TTextTests" name="Test_DrawText_brushClear_emitsNoBackgroundRect" time="0.005" />
-  <testcase classname="TTextTests" name="Test_DrawText_brushSolid_emitsFilledRectBeforeText" time="0.004" />
-  <testcase classname="TTextTests" name="Test_DrawText_brushSolid_xyOverload_rectMatchesTextBounds" time="0.003" />
-  <testcase classname="TTextTests" name="Test_DrawText_brushSolid_rectOverload_rectMatchesARect" time="0.003" />
-  <testcase classname="TTextTests" name="Test_DrawText_brushSolid_doesNotConsultPen" time="0.004" />
-  <testcase classname="TTextTests" name="Test_DrawParagraph_brushSolid_emitsSingleBackgroundFillNotPerLine" time="0.003" />
-  <testcase classname="TTextTests" name="Test_DrawText_zeroAngle_emitsNoCm" time="0.003" />
-  <testcase classname="TTextTests" name="Test_DrawText_explicitZeroAngle_emitsNoCm" time="0.002" />
-  <testcase classname="TTextTests" name="Test_DrawText_ninetyDegrees_emitsCmAndIsBalancedByQ" time="0.002" />
-  <testcase classname="TTextTests" name="Test_DrawText_ninetyDegrees_cmValuesMatchFormula" time="0.004" />
+  <testcase classname="TTextTests" name="Test_DrawText_brushClear_emitsNoBackgroundRect" time="0.002" />
+  <testcase classname="TTextTests" name="Test_DrawText_brushSolid_emitsFilledRectBeforeText" time="0.003" />
+  <testcase classname="TTextTests" name="Test_DrawText_brushSolid_xyOverload_rectMatchesTextBounds" time="0.004" />
+  <testcase classname="TTextTests" name="Test_DrawText_brushSolid_rectOverload_rectMatchesARect" time="0.017" />
+  <testcase classname="TTextTests" name="Test_DrawText_brushSolid_doesNotConsultPen" time="0.008" />
+  <testcase classname="TTextTests" name="Test_DrawParagraph_brushSolid_emitsSingleBackgroundFillNotPerLine" time="0.005" />
+  <testcase classname="TTextTests" name="Test_DrawText_zeroAngle_emitsNoCm" time="0.017" />
+  <testcase classname="TTextTests" name="Test_DrawText_explicitZeroAngle_emitsNoCm" time="0.003" />
+  <testcase classname="TTextTests" name="Test_DrawText_ninetyDegrees_emitsCmAndIsBalancedByQ" time="0.003" />
+  <testcase classname="TTextTests" name="Test_DrawText_ninetyDegrees_cmValuesMatchFormula" time="0.002" />
   <testcase classname="TTTFTests" name="Test_Load_Arial_succeeds" time="0.001" />
   <testcase classname="TTTFTests" name="Test_Load_NonExistentFile_raises" time="0.000" />
   <testcase classname="TTTFTests" name="Test_Load_RandomBytes_raises" time="0.000" />
@@ -214,23 +214,23 @@
   <testcase classname="TTTFTests" name="Test_FontUnitsToPdf_at1000UnitsPerEm_isIdentity" time="0.001" />
   <testcase classname="TTTFTests" name="Test_FontUnitsToPdf_at2048UnitsPerEm_scales" time="0.001" />
   <testcase classname="TTTFTests" name="Test_PdfFlags_includeNonsymbolic" time="0.001" />
-  <testcase classname="TWinFontsTests" name="Test_Lookup_Arial_returnsExistingPath" time="0.006" />
+  <testcase classname="TWinFontsTests" name="Test_Lookup_Arial_returnsExistingPath" time="0.007" />
   <testcase classname="TWinFontsTests" name="Test_Lookup_ArialBold_returnsDifferentPath" time="0.000" />
   <testcase classname="TWinFontsTests" name="Test_Lookup_ArialBoldItalic_returnsDifferentPath" time="0.000" />
   <testcase classname="TWinFontsTests" name="Test_Lookup_NonExistentFont_returnsEmpty" time="0.000" />
   <testcase classname="TWinFontsTests" name="Test_Lookup_Calibri_returnsExistingPath" time="0.000" />
   <testcase classname="TWinFontsTests" name="Test_Lookup_BoldFallbackToRegular_whenNoBoldVariant" time="0.000" />
   <testcase classname="TWinFontsTests" name="Test_Lookup_CaseInsensitive" time="0.000" />
-  <testcase classname="TTTFEmitTests" name="Test_Arial_emitsTrueTypeSubtype" time="0.017" />
-  <testcase classname="TTTFEmitTests" name="Test_Arial_emitsFontDescriptor" time="0.020" />
-  <testcase classname="TTTFEmitTests" name="Test_Arial_emitsFontFile2WithLength1" time="0.017" />
-  <testcase classname="TTTFEmitTests" name="Test_Arial_baseFontMatchesPostScriptName" time="0.016" />
-  <testcase classname="TTTFEmitTests" name="Test_Arial_widthsArrayHas224Entries" time="0.017" />
-  <testcase classname="TTTFEmitTests" name="Test_Arial_fontDescriptorIncludesFontBBox" time="0.017" />
-  <testcase classname="TTTFEmitTests" name="Test_Arial_fontDescriptorHasNonsymbolicFlag" time="0.017" />
-  <testcase classname="TTTFEmitTests" name="Test_UnknownFontName_fallsBackToHelvetica" time="0.003" />
-  <testcase classname="TTTFEmitTests" name="Test_MixedTTFAndStandard14_eachGetOwnFontDict" time="0.016" />
-  <testcase classname="TTTFEmitTests" name="Test_ArialBold_resolvesToBoldFile" time="0.016" />
+  <testcase classname="TTTFEmitTests" name="Test_Arial_emitsTrueTypeSubtype" time="0.026" />
+  <testcase classname="TTTFEmitTests" name="Test_Arial_emitsFontDescriptor" time="0.024" />
+  <testcase classname="TTTFEmitTests" name="Test_Arial_emitsFontFile2WithLength1" time="0.023" />
+  <testcase classname="TTTFEmitTests" name="Test_Arial_baseFontMatchesPostScriptName" time="0.021" />
+  <testcase classname="TTTFEmitTests" name="Test_Arial_widthsArrayHas224Entries" time="0.021" />
+  <testcase classname="TTTFEmitTests" name="Test_Arial_fontDescriptorIncludesFontBBox" time="0.020" />
+  <testcase classname="TTTFEmitTests" name="Test_Arial_fontDescriptorHasNonsymbolicFlag" time="0.027" />
+  <testcase classname="TTTFEmitTests" name="Test_UnknownFontName_fallsBackToHelvetica" time="0.004" />
+  <testcase classname="TTTFEmitTests" name="Test_MixedTTFAndStandard14_eachGetOwnFontDict" time="0.031" />
+  <testcase classname="TTTFEmitTests" name="Test_ArialBold_resolvesToBoldFile" time="0.023" />
   <testcase classname="TImageTests" name="Test_Flate_emptyInput_producesValidStream" time="0.000" />
   <testcase classname="TImageTests" name="Test_Flate_helloWorldRoundTrip" time="0.000" />
   <testcase classname="TImageTests" name="Test_Flate_largeRedundantInput_compressesWell" time="0.000" />
@@ -243,16 +243,16 @@
   <testcase classname="TImageTests" name="Test_ExtractFromPng_opaque_isOpaqueKind" time="0.000" />
   <testcase classname="TImageTests" name="Test_ExtractFromPng_bodyHas3BytesPerPixel" time="0.000" />
   <testcase classname="TImageTests" name="Test_ExtractImageData_nilGraphic_raises" time="0.000" />
-  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_bitmap_emitsImageXObject" time="0.014" />
-  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_bitmap_emitsFlateDecode" time="0.004" />
-  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_bitmap_includesWidthAndHeightInDict" time="0.003" />
+  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_bitmap_emitsImageXObject" time="0.016" />
+  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_bitmap_emitsFlateDecode" time="0.014" />
+  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_bitmap_includesWidthAndHeightInDict" time="0.004" />
   <testcase classname="TPictureEmitTests" name="Test_DrawPicture_bitmap_emitsCmAndDoOperators" time="0.003" />
   <testcase classname="TPictureEmitTests" name="Test_DrawPicture_bitmap_emitsXObjectResourceEntry" time="0.003" />
-  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_pngOpaque_emitsImageXObject" time="0.002" />
-  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_pngWithAlpha_emitsSMaskRef" time="0.002" />
+  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_pngOpaque_emitsImageXObject" time="0.003" />
+  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_pngWithAlpha_emitsSMaskRef" time="0.003" />
   <testcase classname="TPictureEmitTests" name="Test_DrawPicture_pngWithAlpha_emitsTwoImageObjects" time="0.002" />
   <testcase classname="TPictureEmitTests" name="Test_DrawPicture_jpeg_emitsDCTDecodeFilter" time="0.003" />
-  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_samePictureTwice_dedupsToSingleXObject" time="0.002" />
+  <testcase classname="TPictureEmitTests" name="Test_DrawPicture_samePictureTwice_dedupsToSingleXObject" time="0.004" />
   <testcase classname="TPictureEmitTests" name="Test_DrawPicture_beforeNewPage_doesNotRaise" time="0.000" />
   <testcase classname="TIntegrationTests" name="Test_NewDocument_pageCountIsZero" time="0.000" />
   <testcase classname="TIntegrationTests" name="Test_Save_raisesEPDFErrorWhenNoPagesAdded" time="0.001" />
@@ -261,15 +261,20 @@
   <testcase classname="TIntegrationTests" name="Test_NewPage_landscape_swapsDimensions" time="0.000" />
   <testcase classname="TIntegrationTests" name="Test_NewPage_psCustom_requiresExplicitDimensions" time="0.000" />
   <testcase classname="TIntegrationTests" name="Test_NewPage_psCustom_acceptsPositiveDimensions" time="0.000" />
+  <testcase classname="TIntegrationTests" name="Test_NewPage_paramless_secondPage_inheritsSizeAndOrientation" time="0.000" />
+  <testcase classname="TIntegrationTests" name="Test_NewPage_paramless_secondPage_inheritsPaperColor" time="0.000" />
+  <testcase classname="TIntegrationTests" name="Test_NewPage_paramless_secondPage_inheritsCustomDimensions" time="0.000" />
+  <testcase classname="TIntegrationTests" name="Test_NewPage_paramless_firstPage_stillUsesDefaults" time="0.000" />
   <testcase classname="TIntegrationTests" name="Test_NewPage_defaultPaperColor_isWhite" time="0.000" />
   <testcase classname="TIntegrationTests" name="Test_NewPage_explicitPaperColor_setsProperty" time="0.000" />
-  <testcase classname="TIntegrationTests" name="Test_NewPage_whitePaper_emitsNoBackgroundFill" time="0.002" />
-  <testcase classname="TIntegrationTests" name="Test_NewPage_nonWhitePaper_emitsBackgroundFill" time="0.002" />
+  <testcase classname="TIntegrationTests" name="Test_NewPage_whitePaper_emitsNoBackgroundFill" time="0.003" />
+  <testcase classname="TIntegrationTests" name="Test_NewPage_nonWhitePaper_emitsBackgroundFill" time="0.018" />
   <testcase classname="TIntegrationTests" name="Test_DrawLine_beforeNewPage_raisesEPDFError" time="0.000" />
   <testcase classname="TIntegrationTests" name="Test_DrawText_beforeNewPage_raisesEPDFError" time="0.000" />
-  <testcase classname="TIntegrationTests" name="Test_Save_singlePage_writesValidPdfFile" time="0.002" />
+  <testcase classname="TIntegrationTests" name="Test_Save_singlePage_writesValidPdfFile" time="0.003" />
   <testcase classname="TIntegrationTests" name="Test_Save_singlePage_containsCatalogPagesAndPage" time="0.002" />
-  <testcase classname="TIntegrationTests" name="Test_Save_singlePage_correctMediaBoxFor_A4_300dpi" time="0.002" />
+  <testcase classname="TIntegrationTests" name="Test_Save_singlePage_correctMediaBoxFor_A4_300dpi" time="0.010" />
   <testcase classname="TIntegrationTests" name="Test_Save_threePages_kidsArrayHasThreeRefs" time="0.002" />
-  <testcase classname="TIntegrationTests" name="Test_Save_LetterPortrait_72dpi" time="0.002" />
+  <testcase classname="TIntegrationTests" name="Test_Save_LetterPortrait_72dpi" time="0.003" />
+  <testcase classname="TIntegrationTests" name="Test_Save_returnsByteCount_matchingFileSize" time="0.003" />
 </testsuite>

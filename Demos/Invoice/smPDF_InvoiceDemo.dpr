@@ -35,7 +35,7 @@ const
   PAGE_H   = 842;
   RIGHT    = PAGE_W - MARGIN;
 var
-  y, tableTop: Integer;
+  x, y, tableTop: Integer;
   subtotal, tax, total: Double;
 begin
   // Logo: three overlapping discs in the top-left
@@ -212,11 +212,38 @@ begin
     MARGIN, PAGE_H - 40);
   pdf.DrawText('Page 1 of 1',
     TRect.Create(MARGIN, PAGE_H - 40, RIGHT, PAGE_H - 26), taRightJustify);
+
+  // Tiled "PAID" watermark drawn LAST so it sits on top of the invoice
+  // content. The 4-arg DrawText overload takes a CCW degrees angle and
+  // rotates around the (X, Y) anchor — tile anchors on a regular grid and
+  // each glyph row becomes a diagonal band at 45 degrees. Range extends past
+  // the page edges so the rotated bounding boxes still cover the corners;
+  // anything outside the MediaBox is clipped by the viewer.
+  pdf.Font.Name        := 'Helvetica';
+  pdf.Font.Bold        := True;
+  pdf.Font.Italics     := False;
+  pdf.Font.Underline   := False;
+  pdf.Font.Size        := 60;
+  pdf.Font.Color       := $00D0D0D0;        // light grey (no transparency in PDF 1.4 path)
+  pdf.Font.StrokeStyle := ssNone;
+  pdf.Brush.Style      := brushClear;       // don't paint a background behind the watermark
+  y := -180;
+  while y < PAGE_H + 180 do
+  begin
+    x := -180;
+    while x < PAGE_W + 180 do
+    begin
+      pdf.DrawText('PAID', x, y, 45);
+      Inc(x, 180);
+    end;
+    Inc(y, 180);
+  end;
 end;
 
 var
   pdf: TsmPDF;
   outDir, outFile: string;
+  nBytes: Int64;
 begin
   try
     outDir  := ExtractFilePath(ParamStr(0));
@@ -226,13 +253,13 @@ begin
     try
       pdf.NewPage(psA4, poPortrait, 72);
       DrawInvoice(pdf);
-      pdf.Save(outFile);
+      nBytes := pdf.Save(outFile);
     finally
       pdf.Free;
     end;
 
     Writeln('OK: wrote ', outFile);
-    Writeln('     bytes: ', TFile.GetSize(outFile));
+    Writeln('     bytes: ', nBytes);
     ExitCode := 0;
   except
     on E: Exception do

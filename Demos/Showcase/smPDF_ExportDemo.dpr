@@ -928,6 +928,7 @@ end;
 var
   pdf: TsmPDF;
   outDir, outFile: string;
+  nBytes: Int64;
 begin
   try
     outDir  := ExtractFilePath(ParamStr(0));
@@ -956,14 +957,14 @@ begin
       pdf.NewPage(psA4, poPortrait,  72);
       DrawPage7Rotation(pdf);
 
-      pdf.Save(outFile);
+      nBytes := pdf.Save(outFile);
     finally
       pdf.Free;
     end;
 
     Writeln('OK: wrote ', outFile);
     Writeln('     pages: 7');
-    Writeln('     bytes: ', TFile.GetSize(outFile));
+    Writeln('     bytes: ', nBytes);
     ExitCode := 0;
   except
     on E: Exception do

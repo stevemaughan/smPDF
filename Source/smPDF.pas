@@ -8,6 +8,11 @@ uses
   SysUtils, Classes, Types, UITypes, Generics.Collections, Vcl.Graphics,
   smPDF.Page, smPDF.Writer, smPDF.Fonts, smPDF.TTF, smPDF.Images;
 
+const
+  // SemVer string, bumped per https://semver.org/. Read at runtime via
+  // SMPDF_VERSION; useful for diagnostics, About boxes, and bug reports.
+  SMPDF_VERSION = '1.0.0';
+
 type
   EPDFError = class(Exception);
 
@@ -104,6 +109,8 @@ type
     fDPI:             Integer;
     fHeight:          Integer;
     fWidth:           Integer;
+    fCustomWidth:     Integer;     // user-supplied AWidth from last NewPage (only used for psCustom)
+    fCustomHeight:    Integer;     // user-supplied AHeight from last NewPage (only used for psCustom)
     fPaperColor:      TColor;
     fCompressStreams: Boolean;
     fPen:             TPDFPen;
@@ -136,8 +143,9 @@ type
       const AWidth: Integer = 0; const AHeight: Integer = 0); overload;
     procedure NewPage; overload;
 
-    procedure Save(const AFileName: string); overload;
-    procedure Save(const AFileName: string; const AEmbedFonts: Boolean); overload;
+    // Save returns the number of bytes written to AFileName.
+    function Save(const AFileName: string): Int64; overload;
+    function Save(const AFileName: string; const AEmbedFonts: Boolean): Int64; overload;
 
     // AAngle rotates the text counter-clockwise (in degrees) around (X, Y) —
     // matches VCL TFont.Orientation. 0 = horizontal, 90 = reads upward,
@@ -248,6 +256,8 @@ begin
   fSize            := psA4;
   fOrientation     := poPortrait;
   fDPI             := 300;
+  fCustomWidth     := 0;
+  fCustomHeight    := 0;
 end;
 
 destructor TsmPDF.Destroy;
@@ -265,7 +275,8 @@ end;
 function TsmPDF.ResolveCurrentFont: TPDFResolvedFont;
 var
   ttfPath: string;
-  ttf: TTTFFont;
+  ttf:     TTTFFont;
+  psName:  string;
 begin
   if IsStandard14FamilyName(fFont.Name) then
   begin
@@ -287,10 +298,24 @@ begin
     Exit;
   end;
 
-  // Load + cache by PostScript name (each bold/italic variant is its own file)
-  ttf := TTTFFont.Create(ttfPath);
+  // Load + cache by PostScript name (each bold/italic variant is its own file).
+  // If the TTF is malformed, locked, or otherwise unloadable at parse time,
+  // fall back to Helvetica — same outcome as missing-from-registry above.
   try
-    var psName := ttf.Metrics.PostScriptName;
+    ttf := TTTFFont.Create(ttfPath);
+  except
+    on Exception do
+    begin
+      Result.IsStandard  := True;
+      Result.TTFFont     := nil;
+      Result.StdFont     := ResolveStandardFont('Helvetica', fFont.Bold, fFont.Italics);
+      Result.PdfFontName := StandardFontPdfName(Result.StdFont);
+      Exit;
+    end;
+  end;
+
+  try
+    psName := ttf.Metrics.PostScriptName;
     if fTTFFonts.ContainsKey(psName) then
     begin
       // Already loaded a font with this PostScript name; reuse the cached
@@ -447,12 +472,16 @@ begin
     heightPx := tmp;
   end;
 
-  fSize        := APaperSize;
-  fOrientation := AOrientation;
-  fDPI         := ADPI;
-  fWidth       := widthPx;
-  fHeight      := heightPx;
-  fPaperColor  := APaperColor;
+  fSize         := APaperSize;
+  fOrientation  := AOrientation;
+  fDPI          := ADPI;
+  fWidth        := widthPx;
+  fHeight       := heightPx;
+  fPaperColor   := APaperColor;
+  // Track the user-supplied AWidth/AHeight verbatim (pre-orientation-swap) so
+  // a follow-up parameter-less NewPage can re-create a psCustom page faithfully.
+  fCustomWidth  := AWidth;
+  fCustomHeight := AHeight;
 
   fCurrentPage := TPDFPage.Create(widthPx, heightPx, ADPI);
   fPages.Add(fCurrentPage);
@@ -478,7 +507,14 @@ end;
 
 procedure TsmPDF.NewPage;
 begin
-  NewPage(psA4, poPortrait, 300);
+  // First page: established defaults (A4 portrait, 300 dpi, white paper).
+  // Second-and-later pages: inherit the previous page's settings so that a
+  // multi-page document with non-default paper/orientation/DPI/colour doesn't
+  // need to repeat the full NewPage signature for every page.
+  if fCurrentPage = nil then
+    NewPage(psA4, poPortrait, 300)
+  else
+    NewPage(fSize, fOrientation, fDPI, fPaperColor, fCustomWidth, fCustomHeight);
 end;
 
 procedure TsmPDF.EnsureCurrentPage;
@@ -487,7 +523,7 @@ begin
     raise EPDFError.Create('No active page. Call NewPage before drawing.');
 end;
 
-procedure TsmPDF.Save(const AFileName: string);
+function TsmPDF.Save(const AFileName: string): Int64;
 var
   writer: TPDFWriter;
   catalogId, pagesRootId, fontId, imgId: TPDFObjectId;
@@ -500,6 +536,7 @@ var
   fs: TFileStream;
   isSymbolic: Boolean;
 begin
+  Result := 0;
   if fPages.Count = 0 then
     raise EPDFError.Create('Cannot save: no pages added. Call NewPage first.');
 
@@ -589,6 +626,7 @@ begin
     finally
       fs.Free;
     end;
+    Result := Length(bytes);
   finally
     writer.Free;
     imageKeysAcrossDoc.Free;
@@ -598,10 +636,10 @@ begin
   end;
 end;
 
-procedure TsmPDF.Save(const AFileName: string; const AEmbedFonts: Boolean);
+function TsmPDF.Save(const AFileName: string; const AEmbedFonts: Boolean): Int64;
 begin
   // AEmbedFonts is honoured starting Phase 4 (TTF embedding).
-  Save(AFileName);
+  Result := Save(AFileName);
 end;
 
 function TsmPDF.PageCount: Integer;

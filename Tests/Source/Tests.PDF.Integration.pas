@@ -21,6 +21,12 @@ type
     procedure Test_NewPage_psCustom_requiresExplicitDimensions;
     procedure Test_NewPage_psCustom_acceptsPositiveDimensions;
 
+    // Parameter-less NewPage inherits previous page's settings (2nd+ page).
+    procedure Test_NewPage_paramless_secondPage_inheritsSizeAndOrientation;
+    procedure Test_NewPage_paramless_secondPage_inheritsPaperColor;
+    procedure Test_NewPage_paramless_secondPage_inheritsCustomDimensions;
+    procedure Test_NewPage_paramless_firstPage_stillUsesDefaults;
+
     // Paper color
     procedure Test_NewPage_defaultPaperColor_isWhite;
     procedure Test_NewPage_explicitPaperColor_setsProperty;
@@ -35,6 +41,7 @@ type
     procedure Test_Save_singlePage_correctMediaBoxFor_A4_300dpi;
     procedure Test_Save_threePages_kidsArrayHasThreeRefs;
     procedure Test_Save_LetterPortrait_72dpi;
+    procedure Test_Save_returnsByteCount_matchingFileSize;
   end;
 
 implementation
@@ -391,6 +398,104 @@ begin
   end;
   s := BytesToLatin1(ReadAllBytes(fileName));
   AssertContains('/MediaBox [0 0 612 792]', s);
+end;
+
+procedure TIntegrationTests.Test_NewPage_paramless_secondPage_inheritsSizeAndOrientation;
+var
+  pdf: TsmPDF;
+  w1, h1: Integer;
+begin
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage(psA3, poLandscape, 72);   // A3 landscape at 72dpi
+    w1 := pdf.Width;
+    h1 := pdf.Height;
+    pdf.NewPage;                           // parameter-less -> should inherit
+    AssertEquals(Ord(psA3),         Ord(pdf.Size),        'paper size inherited');
+    AssertEquals(Ord(poLandscape),  Ord(pdf.Orientation), 'orientation inherited');
+    AssertEquals(72,                pdf.DPI,              'DPI inherited');
+    AssertEquals(w1,                pdf.Width,            'width matches previous page');
+    AssertEquals(h1,                pdf.Height,           'height matches previous page');
+  finally
+    pdf.Free;
+  end;
+end;
+
+procedure TIntegrationTests.Test_NewPage_paramless_secondPage_inheritsPaperColor;
+var
+  pdf: TsmPDF;
+begin
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage(psA4, poPortrait, 72, clYellow);
+    pdf.NewPage;
+    AssertEquals(Integer(clYellow), Integer(pdf.PaperColor),
+      'paper colour inherited from previous page');
+  finally
+    pdf.Free;
+  end;
+end;
+
+procedure TIntegrationTests.Test_NewPage_paramless_secondPage_inheritsCustomDimensions;
+var
+  pdf: TsmPDF;
+begin
+  pdf := TsmPDF.Create;
+  try
+    // psCustom + landscape exercises the custom-dim path through the
+    // orientation swap; the second page must end up the same size as the first.
+    pdf.NewPage(psCustom, poLandscape, 72, clWhite, 1000, 500);
+    AssertEquals(500,  pdf.Width,  'first page width post-swap');
+    AssertEquals(1000, pdf.Height, 'first page height post-swap');
+    pdf.NewPage;
+    AssertEquals(500,  pdf.Width,  'second page width matches first');
+    AssertEquals(1000, pdf.Height, 'second page height matches first');
+  finally
+    pdf.Free;
+  end;
+end;
+
+procedure TIntegrationTests.Test_NewPage_paramless_firstPage_stillUsesDefaults;
+var
+  pdf: TsmPDF;
+begin
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage;   // no previous page -> A4 portrait at 300 dpi
+    AssertEquals(Ord(psA4),        Ord(pdf.Size),        'default paper size');
+    AssertEquals(Ord(poPortrait),  Ord(pdf.Orientation), 'default orientation');
+    AssertEquals(300,              pdf.DPI,              'default DPI');
+  finally
+    pdf.Free;
+  end;
+end;
+
+procedure TIntegrationTests.Test_Save_returnsByteCount_matchingFileSize;
+var
+  pdf: TsmPDF;
+  fileName: string;
+  returned, actual: Int64;
+  fs: TFileStream;
+begin
+  fileName := TempPdf('save-returns-bytes.pdf');
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage(psA4, poPortrait, 72);
+    pdf.DrawText('size check', 50, 50);
+    returned := pdf.Save(fileName);
+  finally
+    pdf.Free;
+  end;
+  // Capture actual file size via TFileStream (XE8-compatible — TFile.GetSize
+  // requires Delphi 10.4 Sydney+).
+  fs := TFileStream.Create(fileName, fmOpenRead or fmShareDenyWrite);
+  try
+    actual := fs.Size;
+  finally
+    fs.Free;
+  end;
+  AssertTrue(returned > 0, 'Save should return a positive byte count');
+  AssertEquals(actual, returned, 'Save return value matches file size on disk');
 end;
 
 initialization

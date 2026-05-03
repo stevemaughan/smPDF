@@ -27,16 +27,19 @@ uses
 {$R *.dfm}
 
 procedure TMainForm.btnExportClick(Sender: TObject);
+var
+  PDF:   TsmPDF;
+  xRect: TRect;
 begin
 
   //-- Create the object
-  var PDF: TsmPDF := TsmPDF.create;
+  PDF := TsmPDF.Create;
 
   //-- Start a new page on pale-ivory paper to demonstrate APaperColor.
   PDF.NewPage(TPDFPaperSize.psLetter, TPDFOrientation.poPortrait, 300, $00E0F8FF);
 
   //-- Write a Title
-  var xRect: TRect := Rect(0, 0, PDF.Width, PDF.Height div 10);
+  xRect := Rect(0, 0, PDF.Width, PDF.Height div 10);
   PDF.DrawText('Main Title', xRect, TAlignment.taCenter);
 
   //-- More Complex Text

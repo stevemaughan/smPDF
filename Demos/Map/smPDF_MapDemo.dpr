@@ -320,6 +320,7 @@ var
   pageW:      Integer;
   pageH:      Integer;
   t0, t1:     TDateTime;
+  nBytes:     Int64;
 begin
   try
     exeDir  := ExtractFilePath(ParamStr(0));
@@ -357,7 +358,7 @@ begin
 
         Writeln('Saving PDF');
         t0 := Now;
-        pdf.Save(outFile);
+        nBytes := pdf.Save(outFile);
         t1 := Now;
         Writeln(Format('  saved in %.1fs', [(t1 - t0) * 86400]));
       finally
@@ -368,7 +369,7 @@ begin
     end;
 
     Writeln('OK: wrote ', outFile);
-    Writeln('     bytes: ', TFile.GetSize(outFile));
+    Writeln('     bytes: ', nBytes);
     ExitCode := 0;
   except
     on E: Exception do
