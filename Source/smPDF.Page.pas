@@ -102,6 +102,7 @@ type
     procedure SetTextFont(const AResourceName: string;
       ASizePoints: Double);                                         // /F1 12 Tf
     procedure SetTextMatrixUserBaseline(XPx, YPxBaseline: Double);  // 1 0 0 1 X Y Tm
+    procedure SetTextMatrixUser(A, B, C, D, XPx, YPxBaseline: Double); // A B C D X Y Tm
     procedure SetTextRenderingMode(AMode: Integer);                 // 0=fill, 1=stroke, 2=fill+stroke, 3=invisible
     procedure ShowTextAnsi(const AAnsiBytes: AnsiString);           // (...) Tj — bytes already WinAnsi
 
@@ -484,6 +485,11 @@ end;
 procedure TPDFPage.SetTextMatrixUserBaseline(XPx, YPxBaseline: Double);
 begin
   WriteOp('Tm', [1.0, 0.0, 0.0, 1.0, PdfX(XPx), PdfY(YPxBaseline)]);
+end;
+
+procedure TPDFPage.SetTextMatrixUser(A, B, C, D, XPx, YPxBaseline: Double);
+begin
+  WriteOp('Tm', [A, B, C, D, PdfX(XPx), PdfY(YPxBaseline)]);
 end;
 
 procedure TPDFPage.SetTextRenderingMode(AMode: Integer);

@@ -6,7 +6,7 @@ interface
 
 uses
   SysUtils, Classes, Types, UITypes, Generics.Collections, Vcl.Graphics,
-  smPDF.Page, smPDF.Writer, smPDF.Fonts, smPDF.TTF, smPDF.Images;
+  smPDF.Page, smPDF.Writer, smPDF.Fonts, smPDF.TTF, smPDF.Images, smPDF.FontRegistry;
 
 const
   // SemVer string, bumped per https://semver.org/. Read at runtime via
@@ -15,16 +15,6 @@ const
 
 type
   EPDFError = class(Exception);
-
-  // Internal: result of resolving Font.Name + Bold + Italics to either a
-  // built-in PDF font or an installed TTF. Exposed in interface only because
-  // private TsmPDF method signatures need it.
-  TPDFResolvedFont = record
-    PdfFontName: string;
-    IsStandard:  Boolean;
-    StdFont:     TStandardFont;
-    TTFFont:     TTTFFont;
-  end;
 
   TPDFOrientation = (poPortrait, poLandscape);
 
@@ -120,7 +110,8 @@ type
     fBrush:           TPDFBrush;
     fPages:             TObjectList<TPDFPage>;
     fCurrentPage:       TPDFPage;
-    fTTFFonts:          TObjectDictionary<string, TTTFFont>;  // PostScript name -> font
+    fFonts:             TPDFFontRegistry;
+    fWarnings:          TStringList;
     fImageData:         TDictionary<string, TPDFImageData>;   // image key -> extracted data
     fImageKeyByPicture: TDictionary<TObject, string>;         // TPicture pointer -> key (for dedup)
     fPathOpen:          Boolean;
@@ -145,13 +136,15 @@ type
     procedure DrawPictureInRect(const APicture: TPicture; ALeft, ATop, ARight, ABottom: Double;
       AAlignment: TAlignment; AStretch: Boolean);
 
-    function ResolveCurrentFont: TPDFResolvedFont;
-    function MeasureWidthPt(const AResolved: TPDFResolvedFont; ASizePt: Double; const AAnsi: AnsiString): Double;
-    function FontAscentPt(const AResolved: TPDFResolvedFont; ASizePt: Double): Double;
-    function FontLineHeightPt(const AResolved: TPDFResolvedFont; ASizePt: Double): Double;
+    function ResolveCurrentFont: TPDFFontResolution;
+    function MeasureWidthPt(const AResolved: TPDFFontResolution; ASizePt: Double; const AAnsi: AnsiString): Double;
+    function FontAscentPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
+    function FontLineHeightPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
+    function GetWarnings: TStrings;
 
     procedure WriteDocument(AWriter: TPDFWriter);
     function EmitTrueTypeFont(AWriter: TPDFWriter; ATTF: TTTFFont): TPDFObjectId;
+    function EmitStandardFont(AWriter: TPDFWriter; AFont: TStandardFont): TPDFObjectId;
     function EmitImageObject(AWriter: TPDFWriter; const AData: TPDFImageData): TPDFObjectId;
     function GetOrAddImage(APicture: TPicture): string;
     function GetWidth: Integer;
@@ -280,12 +273,16 @@ type
     property Pen:             TPDFPen         read fPen;
     property Brush:           TPDFBrush       read fBrush;
     property PaperColor:      TColor          read fPaperColor;
+    // Everything the library had to work around, one line each: fonts that
+    // were missing, not TrueType, or not embeddable, and characters a font
+    // could not show. Read-only; cleared only by creating a new TsmPDF.
+    property Warnings:        TStrings        read GetWarnings;
   end;
 
 implementation
 
 uses
-  System.Math, smPDF.Geometry, smPDF.Types, smPDF.WinFonts;
+  System.Math, smPDF.Geometry, smPDF.Types;
 
 { TPDFFont }
 
@@ -329,7 +326,8 @@ begin
   fBrush             := TPDFBrush.Create;
   fFont              := TPDFFont.Create;
   fPages             := TObjectList<TPDFPage>.Create(True);
-  fTTFFonts          := TObjectDictionary<string, TTTFFont>.Create([doOwnsValues]);
+  fWarnings          := TStringList.Create;
+  fFonts             := TPDFFontRegistry.Create(fWarnings);
   fImageData         := TDictionary<string, TPDFImageData>.Create;
   fImageKeyByPicture := TDictionary<TObject, string>.Create;
   fCurrentPage       := nil;
@@ -345,7 +343,8 @@ destructor TsmPDF.Destroy;
 begin
   fImageKeyByPicture.Free;
   fImageData.Free;
-  fTTFFonts.Free;
+  fFonts.Free;
+  fWarnings.Free;
   fPages.Free;
   fFont.Free;
   fBrush.Free;
@@ -379,102 +378,62 @@ begin
   if Result <= 0 then Result := 12;
 end;
 
-function TsmPDF.ResolveCurrentFont: TPDFResolvedFont;
-var
-  ttfPath: string;
-  ttf:     TTTFFont;
-  psName:  string;
+function TsmPDF.GetWarnings: TStrings;
 begin
-  if IsStandard14FamilyName(fFont.Name) then
-  begin
-    Result.IsStandard  := True;
-    Result.TTFFont     := nil;
-    Result.StdFont     := ResolveStandardFont(fFont.Name, fFont.Bold, fFont.Italics);
-    Result.PdfFontName := StandardFontPdfName(Result.StdFont);
-    Exit;
-  end;
-
-  ttfPath := LookupSystemTTFPath(fFont.Name, fFont.Bold, fFont.Italics);
-  if ttfPath = '' then
-  begin
-    // Unknown family and no installed TTF -> fall back to Helvetica
-    Result.IsStandard  := True;
-    Result.TTFFont     := nil;
-    Result.StdFont     := ResolveStandardFont('Helvetica', fFont.Bold, fFont.Italics);
-    Result.PdfFontName := StandardFontPdfName(Result.StdFont);
-    Exit;
-  end;
-
-  // Load + cache by PostScript name (each bold/italic variant is its own file).
-  // If the TTF is malformed, locked, or otherwise unloadable at parse time,
-  // fall back to Helvetica — same outcome as missing-from-registry above.
-  try
-    ttf := TTTFFont.Create(ttfPath);
-  except
-    on Exception do
-    begin
-      Result.IsStandard  := True;
-      Result.TTFFont     := nil;
-      Result.StdFont     := ResolveStandardFont('Helvetica', fFont.Bold, fFont.Italics);
-      Result.PdfFontName := StandardFontPdfName(Result.StdFont);
-      Exit;
-    end;
-  end;
-
-  try
-    psName := ttf.Metrics.PostScriptName;
-    if fTTFFonts.ContainsKey(psName) then
-    begin
-      // Already loaded a font with this PostScript name; reuse the cached
-      // instance and discard the just-loaded duplicate.
-      ttf.Free;
-      ttf := fTTFFonts[psName];
-    end
-    else
-      fTTFFonts.Add(psName, ttf);
-  except
-    ttf.Free;
-    raise;
-  end;
-
-  Result.IsStandard  := False;
-  Result.TTFFont     := ttf;
-  Result.StdFont     := sfHelvetica;  // unused
-  Result.PdfFontName := ttf.Metrics.PostScriptName;
+  Result := fWarnings;
 end;
 
-function TsmPDF.MeasureWidthPt(const AResolved: TPDFResolvedFont; ASizePt: Double;
+function TsmPDF.ResolveCurrentFont: TPDFFontResolution;
+begin
+  Result := fFonts.Resolve(fFont.Name, fFont.Bold, fFont.Italics);
+end;
+
+function TsmPDF.MeasureWidthPt(const AResolved: TPDFFontResolution; ASizePt: Double;
   const AAnsi: AnsiString): Double;
 var
   i, sumUnits: Integer;
+  ttf: TTTFFont;
 begin
-  if AResolved.IsStandard then
-    Result := StandardFontTextWidth(AResolved.StdFont, ASizePt, AAnsi)
+  if AResolved.Face.IsStandard then
+    Result := StandardFontTextWidth(AResolved.Face.StdFont, ASizePt, AAnsi)
   else
   begin
+    ttf := AResolved.Face.TTF;
     sumUnits := 0;
     for i := 1 to Length(AAnsi) do
-      sumUnits := sumUnits + AResolved.TTFFont.CharWidthWinAnsi(Byte(AAnsi[i]));
-    if AResolved.TTFFont.Metrics.UnitsPerEm = 0 then
-      Result := 0
-    else
-      Result := sumUnits * ASizePt / AResolved.TTFFont.Metrics.UnitsPerEm;
+      sumUnits := sumUnits + ttf.CharWidthWinAnsi(Byte(AAnsi[i]));
+    Result := sumUnits * ASizePt / ttf.Metrics.UnitsPerEm;
   end;
 end;
 
-function TsmPDF.FontAscentPt(const AResolved: TPDFResolvedFont; ASizePt: Double): Double;
+function TsmPDF.FontAscentPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
 begin
-  if AResolved.IsStandard then
-    Result := StandardFontAscent(AResolved.StdFont, ASizePt)
+  if AResolved.Face.IsStandard then
+    Result := StandardFontAscent(AResolved.Face.StdFont, ASizePt)
   else
-    Result := AResolved.TTFFont.Metrics.Ascent
-            * ASizePt / AResolved.TTFFont.Metrics.UnitsPerEm;
+    Result := AResolved.Face.TTF.Metrics.Ascent
+            * ASizePt / AResolved.Face.TTF.Metrics.UnitsPerEm;
 end;
 
-function TsmPDF.FontLineHeightPt(const AResolved: TPDFResolvedFont; ASizePt: Double): Double;
+function TsmPDF.FontLineHeightPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
 begin
   // Same 1.2x convention for both Standard 14 and TTF.
   Result := 1.2 * ASizePt;
+end;
+
+function TsmPDF.EmitStandardFont(AWriter: TPDFWriter; AFont: TStandardFont): TPDFObjectId;
+begin
+  Result := AWriter.BeginObject;
+    AWriter.BeginDict;
+      AWriter.WriteName('Type');     AWriter.WriteName('Font');
+      AWriter.WriteName('Subtype');  AWriter.WriteName('Type1');
+      AWriter.WriteName('BaseFont'); AWriter.WriteName(StandardFontPdfName(AFont));
+      if not StandardFontIsSymbolic(AFont) then
+      begin
+        AWriter.WriteName('Encoding'); AWriter.WriteName('WinAnsiEncoding');
+      end;
+    AWriter.EndDict;
+  AWriter.EndObject;
 end;
 
 function TsmPDF.EmitTrueTypeFont(AWriter: TPDFWriter; ATTF: TTTFFont): TPDFObjectId;
@@ -689,7 +648,7 @@ var
   fontNamesAcrossDoc, imageKeysAcrossDoc: TList<string>;
   pageFontName, pageImageKey: string;
   i: Integer;
-  isSymbolic: Boolean;
+  face: TPDFFontFace;
 begin
   if fPages.Count = 0 then
     raise EPDFError.Create('Cannot save: no pages added. Call NewPage first.');
@@ -725,27 +684,13 @@ begin
     // Emit font dicts. Standard 14 -> single Type1 dict; TTF -> Font + Descriptor + FontFile2.
     for pageFontName in fontNamesAcrossDoc do
     begin
-      if fTTFFonts.ContainsKey(pageFontName) then
-      begin
-        fontId := EmitTrueTypeFont(writer, fTTFFonts[pageFontName]);
-        fontIds.Add(pageFontName, fontId);
-      end
+      if not fFonts.FindFace(pageFontName, face) then
+        raise EPDFError.CreateFmt('Internal error: font "%s" used on a page is not registered', [pageFontName]);
+      if face.IsStandard then
+        fontId := EmitStandardFont(writer, face.StdFont)
       else
-      begin
-        isSymbolic := (pageFontName = 'Symbol') or (pageFontName = 'ZapfDingbats');
-        fontId := writer.BeginObject;
-          writer.BeginDict;
-            writer.WriteName('Type');     writer.WriteName('Font');
-            writer.WriteName('Subtype');  writer.WriteName('Type1');
-            writer.WriteName('BaseFont'); writer.WriteName(pageFontName);
-            if not isSymbolic then
-            begin
-              writer.WriteName('Encoding'); writer.WriteName('WinAnsiEncoding');
-            end;
-          writer.EndDict;
-        writer.EndObject;
-        fontIds.Add(pageFontName, fontId);
-      end;
+        fontId := EmitTrueTypeFont(writer, face.TTF);
+      fontIds.Add(pageFontName, fontId);
     end;
 
     // Emit image XObjects (SMask first when needed; EmitImageObject handles ordering).
@@ -1295,9 +1240,15 @@ begin
   end;
 end;
 
+const
+  // GDI's synthetic bold widens strokes by about 1/32 em; its synthetic
+  // italic slants by about 12 degrees.
+  SYNTHETIC_BOLD_EM   = 0.03;
+  SYNTHETIC_ITALIC_TAN = 0.2126;
+
 procedure TsmPDF.EmitOneTextLine(const AText: string; X, Y: Double; ASizePt: Double);
 var
-  resolved: TPDFResolvedFont;
+  resolved: TPDFFontResolution;
   resName: string;
   ansi: AnsiString;
   sizePt, baselineYPx: Double;
@@ -1305,19 +1256,20 @@ var
   textWidthPx: Double;
   underlineYPx: Double;
   underlineThicknessPt: Double;
-  strokeText: Boolean;
+  strokeText, emboldened: Boolean;
 begin
   sizePt := ASizePt;
   if sizePt <= 0 then sizePt := 12;
 
   resolved := ResolveCurrentFont;
-  resName  := fCurrentPage.UseFont(resolved.PdfFontName);
+  resName  := fCurrentPage.UseFont(resolved.Face.Key);
 
   ansi := StringToWinAnsi(AText);
 
   baselineYPx := Y + PtToPx(FontAscentPt(resolved, sizePt));
 
   strokeText := fFont.StrokeStyle <> ssNone;
+  emboldened := resolved.SyntheticBold and not strokeText;
 
   fCurrentPage.SaveState;
   ColorToRGBFloats(fFont.Color, r, g, b);
@@ -1327,12 +1279,20 @@ begin
     ColorToRGBFloats(fFont.StrokeColor, sr, sg, sb);
     fCurrentPage.SetStrokeRGB(sr, sg, sb);
     fCurrentPage.SetLineWidthPt(TextStrokeWidthPt(fFont.StrokeStyle, sizePt));
+  end
+  else if emboldened then
+  begin
+    fCurrentPage.SetStrokeRGB(r, g, b);
+    fCurrentPage.SetLineWidthPt(SYNTHETIC_BOLD_EM * sizePt);
   end;
   fCurrentPage.BeginText;
   fCurrentPage.SetTextFont(resName, sizePt);
-  if strokeText then
+  if strokeText or emboldened then
     fCurrentPage.SetTextRenderingMode(2);  // fill + stroke each glyph
-  fCurrentPage.SetTextMatrixUserBaseline(X, baselineYPx);
+  if resolved.SyntheticItalic then
+    fCurrentPage.SetTextMatrixUser(1, 0, SYNTHETIC_ITALIC_TAN, 1, X, baselineYPx)
+  else
+    fCurrentPage.SetTextMatrixUserBaseline(X, baselineYPx);
   fCurrentPage.ShowTextAnsi(ansi);
   fCurrentPage.EndText;
   fCurrentPage.RestoreState;
@@ -1422,7 +1382,7 @@ procedure TsmPDF.DrawTextInRect(const AText: string; ALeft, ATop, ARight, ABotto
 const
   REF_SIZE_PT = 100.0;  // arbitrary; only ratios matter
 var
-  resolved: TPDFResolvedFont;
+  resolved: TPDFFontResolution;
   ansi: AnsiString;
   refWidthPt, refLineHeightPt: Double;
   rectWidthPt, rectHeightPt: Double;
@@ -1546,7 +1506,7 @@ end;
 
 procedure TsmPDF.MeasureTextPx(const AText: string; out AWidthPx, AHeightPx: Double);
 var
-  resolved: TPDFResolvedFont;
+  resolved: TPDFFontResolution;
   sizePt, widthPt: Double;
 begin
   EnsureCurrentPage;

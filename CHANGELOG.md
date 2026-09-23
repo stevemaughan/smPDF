@@ -40,9 +40,28 @@ break source compatibility; they are marked **Breaking**.
   `DrawParagraph` keep their fractional pixel values.
 - Paper-size and custom pages keep their exact point size across the
   parameterless `NewPage`.
+- **Fonts are resolved through GDI.** `Font.Name` + `Bold` + `Italics` now embed
+  exactly the face GDI would draw: `.ttf` files, members of `.ttc` collections
+  (Cambria, Microsoft YaHei, Yu Gothic, …) and per-user fonts all work. The old
+  registry lookup embedded the wrong face in some families (`'Oswald'` gave
+  Oswald DemiBold) and could not see collections or per-user fonts.
+- Fonts that cannot be embedded fall back to Helvetica and add a line to the
+  new `Warnings` list: unknown families, CFF-flavoured OpenType (PostScript
+  outlines), and fonts whose OS/2 `fsType` forbids embedding.
+- When a family has no bold (or italic) face, text is emboldened (or slanted)
+  the way GDI would, instead of silently using the regular face.
+- Font data is cached per `TsmPDF` instance; the global font map is gone, so
+  documents on different threads no longer share state. Loading a font once per
+  document instead of once per `DrawText` makes labelled pages far faster.
+- `TPDFResolvedFont` is no longer part of the public interface.
+
+### Removed
+
+- `smPDF.WinFonts` (registry-based font lookup), replaced by `smPDF.GdiFonts`.
 
 ### Added
 
+- `Warnings: TStrings` — every fallback the library had to make, one line each.
 - `NewPage(AWidthPt, AHeightPt: Double; ADPI = 72; APaperColor = clWhite)` —
   page size in points, used exactly for the MediaBox. At 72 DPI one drawing
   pixel is one point, so callers can work in points directly.

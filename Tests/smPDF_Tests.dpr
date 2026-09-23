@@ -13,7 +13,7 @@ uses
   Tests.PDF.Fonts in 'Source\Tests.PDF.Fonts.pas',
   Tests.PDF.Text in 'Source\Tests.PDF.Text.pas',
   Tests.PDF.TTF in 'Source\Tests.PDF.TTF.pas',
-  Tests.PDF.WinFonts in 'Source\Tests.PDF.WinFonts.pas',
+  Tests.PDF.FontResolve in 'Source\Tests.PDF.FontResolve.pas',
   Tests.PDF.TTFEmit in 'Source\Tests.PDF.TTFEmit.pas',
   Tests.PDF.Images in 'Source\Tests.PDF.Images.pas',
   Tests.PDF.PictureEmit in 'Source\Tests.PDF.PictureEmit.pas',
