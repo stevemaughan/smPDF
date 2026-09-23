@@ -34,6 +34,7 @@ type
     procedure Test_Path_beginPathTwice_raises;
     procedure Test_Path_clipWhileOpen_raises;
     procedure Test_Path_saveWhileOpen_raises;
+    procedure Test_Path_saveToFileWhileOpen_leavesExistingFile;
     procedure Test_Path_measuringWhileOpen_isAllowed;
     procedure Test_RoundRect_zeroRadius_equalsDrawBox;
     procedure Test_RoundRect_emitsFourCurves;
@@ -43,7 +44,7 @@ type
 implementation
 
 uses
-  StrUtils, Vcl.Graphics, smPDF;
+  StrUtils, IOUtils, Vcl.Graphics, smPDF;
 
 function TClipPathTests.Build(const ABuild: TProc<TObject>): string;
 var
@@ -327,6 +328,36 @@ begin
     TsmPDF(o).MoveTo(0, 0);
     TsmPDF(o).ToBytes;
   end, 'saving with an unfinished path');
+end;
+
+procedure TClipPathTests.Test_Path_saveToFileWhileOpen_leavesExistingFile;
+var
+  pdf: TsmPDF;
+  fileName: string;
+  raised: Boolean;
+begin
+  fileName := TPath.Combine(TPath.GetTempPath, 'smPDF-open-path.pdf');
+  TFile.WriteAllText(fileName, 'keep me');
+  try
+    pdf := TsmPDF.Create;
+    try
+      pdf.NewPage(612, 792);
+      pdf.BeginPath;
+      raised := False;
+      try
+        pdf.Save(fileName);
+      except
+        on EPDFError do raised := True;
+      end;
+      AssertTrue(raised, 'Save with an open path raises');
+      AssertTrue(TFile.Exists(fileName), 'the existing file is not deleted');
+      AssertEquals('keep me', TFile.ReadAllText(fileName), 'nor overwritten');
+    finally
+      pdf.Free;
+    end;
+  finally
+    if TFile.Exists(fileName) then TFile.Delete(fileName);
+  end;
 end;
 
 procedure TClipPathTests.Test_Path_measuringWhileOpen_isAllowed;

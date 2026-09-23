@@ -21,7 +21,7 @@ type
     fGdiBold:     Boolean;
     fGdiItalic:   Boolean;
     fUsedGlyphs:  TDictionary<Word, Cardinal>;  // glyph id -> first code point drawn with it
-    fOutlines:    TDictionary<Word, TGlyphOutline>;
+    fOutlines:    TDictionary<Cardinal, TGlyphOutline>;  // glyph id + style bits -> outline
   public
     constructor CreateStandard(AFont: TStandardFont);
     // Takes ownership of ATTF.
@@ -37,9 +37,11 @@ type
     function UsedGlyphCodepoint(AGlyph: Word): Cardinal;
     function HasUsedGlyphs: Boolean;
 
-    // Glyph outlines fetched from GDI for DrawTextOutlines, in font units.
-    function TryGetOutline(AGlyph: Word; out AOutline: TGlyphOutline): Boolean;
-    procedure AddOutline(AGlyph: Word; const AOutline: TGlyphOutline);
+    // Glyph outlines fetched from GDI for DrawTextOutlines, in font units,
+    // per requested style: when a family has no bold or italic face GDI
+    // simulates it in the outline, so the same glyph differs by style.
+    function TryGetOutline(AGlyph: Word; ABold, AItalic: Boolean; out AOutline: TGlyphOutline): Boolean;
+    procedure AddOutline(AGlyph: Word; ABold, AItalic: Boolean; const AOutline: TGlyphOutline);
 
     // Unique within a document; used as the page resource key.
     property Key:        string        read fKey;
@@ -176,16 +178,23 @@ begin
   Result := (fUsedGlyphs <> nil) and (fUsedGlyphs.Count > 0);
 end;
 
-function TPDFFontFace.TryGetOutline(AGlyph: Word; out AOutline: TGlyphOutline): Boolean;
+function OutlineKey(AGlyph: Word; ABold, AItalic: Boolean): Cardinal;
 begin
-  Result := (fOutlines <> nil) and fOutlines.TryGetValue(AGlyph, AOutline);
+  Result := AGlyph or (Cardinal(Ord(ABold)) shl 16) or (Cardinal(Ord(AItalic)) shl 17);
 end;
 
-procedure TPDFFontFace.AddOutline(AGlyph: Word; const AOutline: TGlyphOutline);
+function TPDFFontFace.TryGetOutline(AGlyph: Word; ABold, AItalic: Boolean;
+  out AOutline: TGlyphOutline): Boolean;
+begin
+  Result := (fOutlines <> nil) and fOutlines.TryGetValue(OutlineKey(AGlyph, ABold, AItalic), AOutline);
+end;
+
+procedure TPDFFontFace.AddOutline(AGlyph: Word; ABold, AItalic: Boolean;
+  const AOutline: TGlyphOutline);
 begin
   if fOutlines = nil then
-    fOutlines := TDictionary<Word, TGlyphOutline>.Create;
-  fOutlines.AddOrSetValue(AGlyph, AOutline);
+    fOutlines := TDictionary<Cardinal, TGlyphOutline>.Create;
+  fOutlines.AddOrSetValue(OutlineKey(AGlyph, ABold, AItalic), AOutline);
 end;
 
 { TPDFFontRegistry }

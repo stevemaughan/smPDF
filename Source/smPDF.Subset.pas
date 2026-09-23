@@ -213,6 +213,11 @@ begin
       end;
       lastCp := m.Codepoint;
     end;
+    // Lengths are 16-bit: beyond this many segments write an empty map.
+    // Glyphs are addressed by id through /CIDToGIDMap, and the text
+    // mapping lives in /ToUnicode, so the embedded cmap is not needed.
+    if segs.Count > 8000 then
+      segs.Clear;
     seg.StartCode := $FFFF;
     seg.EndCode   := $FFFF;
     seg.Delta     := 1;

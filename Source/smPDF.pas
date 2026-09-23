@@ -840,7 +840,17 @@ var
   minutes: Integer;
   sign: Char;
 begin
-  offset := TTimeZone.Local.GetUtcOffset(ADate);
+  // A local time in a spring-forward gap does not exist and raises; the
+  // offset an hour later is the one that applies there.
+  try
+    offset := TTimeZone.Local.GetUtcOffset(ADate);
+  except
+    try
+      offset := TTimeZone.Local.GetUtcOffset(IncHour(ADate, 1));
+    except
+      offset := TTimeSpan.Zero;
+    end;
+  end;
   minutes := Round(offset.TotalMinutes);
   if minutes < 0 then
   begin
@@ -952,6 +962,8 @@ begin
   // Check before creating the file so a failed build doesn't leave an empty file behind.
   if fPages.Count = 0 then
     raise EPDFError.Create('Cannot save: no pages added. Call NewPage first.');
+  if fPathOpen then
+    raise EPDFError.Create('Cannot save: a path is open. Finish it first.');
   fs := TBufferedFileStream.Create(AFileName, fmCreate, FILE_BUFFER_SIZE);
   try
     try
@@ -1769,20 +1781,21 @@ begin
   // text, the underline and the outline all rotate together. No cm is
   // emitted when AAngle is zero, so default callers stay byte-clean.
   BeginRotation(X, Y, AAngle, rotated);
-
-  sizePt := EffectiveFontSize;
-  res := ResolveCurrentFont;
-  baselineY := Y + PtToPx(BaselineOffsetPt(res, sizePt));
-  if fBrush.Style = brushSolid then
-  begin
-    MeasureTextPx(AText, extW, extH);
-    FillRectWithBrush(fCurrentPage, fBrush, X, baselineY - PtToPx(TopToBaselinePt(res, sizePt)),
-      X + extW, baselineY - PtToPx(TopToBaselinePt(res, sizePt)) + extH);
+  try
+    sizePt := EffectiveFontSize;
+    res := ResolveCurrentFont;
+    baselineY := Y + PtToPx(BaselineOffsetPt(res, sizePt));
+    if fBrush.Style = brushSolid then
+    begin
+      MeasureTextPx(AText, extW, extH);
+      FillRectWithBrush(fCurrentPage, fBrush, X, baselineY - PtToPx(TopToBaselinePt(res, sizePt)),
+        X + extW, baselineY - PtToPx(TopToBaselinePt(res, sizePt)) + extH);
+    end;
+    EmitTextLine(AText, X, baselineY, sizePt);
+  finally
+    if rotated then
+      fCurrentPage.RestoreState;
   end;
-  EmitTextLine(AText, X, baselineY, sizePt);
-
-  if rotated then
-    fCurrentPage.RestoreState;
 end;
 
 function TsmPDF.OutlineFont: TPDFFontResolution;
@@ -1818,7 +1831,7 @@ var
   gid: Word;
   outline: TGlyphOutline;
   sizePt, scale, baselineY, penUnits, ox: Double;
-  i, k: Integer;
+  i, k, savedDecimals: Integer;
   pts: TArray<TPointF>;
   rotated: Boolean;
   r, g, b: Double;
@@ -1837,95 +1850,102 @@ begin
   cps := TextToCodepoints(AText);
 
   BeginRotation(X, Y, AAngle, rotated);
-  ctx := nil;
-  fCurrentPage.BeginPathCapture;
   try
-    penUnits := 0;
-    for cp in cps do
-    begin
-      gid := ttf.GlyphIndex(cp);
-      if gid = 0 then
-        fFonts.Warn(Format('Font "%s" has no glyph for U+%.4X (%s); nothing was drawn for it.',
-          [face.GdiFamily, cp, CodepointToString(cp)]))
-      else
+    ctx := nil;
+    // Glyph shapes keep full precision whatever CoordinatePrecision says;
+    // small text would distort at 0 or 1 decimals.
+    savedDecimals := fCurrentPage.CoordDecimals;
+    fCurrentPage.CoordDecimals := 3;
+    fCurrentPage.BeginPathCapture;
+    try
+      penUnits := 0;
+      for cp in cps do
       begin
-        if not face.TryGetOutline(gid, outline) then
+        gid := ttf.GlyphIndex(cp);
+        if gid = 0 then
+          fFonts.Warn(Format('Font "%s" has no glyph for U+%.4X (%s); nothing was drawn for it.',
+            [face.GdiFamily, cp, CodepointToString(cp)]))
+        else
         begin
-          if ctx = nil then
-            ctx := TGdiFontContext.Create(face.GdiFamily, face.GdiBold, face.GdiItalic,
-              ttf.Metrics.UnitsPerEm);
-          if not ctx.GlyphOutline(gid, outline) then
-            outline := Default(TGlyphOutline);
-          face.AddOutline(gid, outline);
-        end;
-        pts := outline.Points;
-        ox := X + penUnits * scale;
-        k := 0;
-        for i := 0 to High(outline.Commands) do
-          case outline.Commands[i] of
-            gcMoveTo:
-              begin
-                fCurrentPage.UserMoveTo(ox + pts[k].X * scale, baselineY - pts[k].Y * scale);
-                Inc(k);
-              end;
-            gcLineTo:
-              begin
-                fCurrentPage.UserLineTo(ox + pts[k].X * scale, baselineY - pts[k].Y * scale);
-                Inc(k);
-              end;
-            gcCurveTo:
-              begin
-                fCurrentPage.UserCurveTo(
-                  ox + pts[k].X * scale,     baselineY - pts[k].Y * scale,
-                  ox + pts[k + 1].X * scale, baselineY - pts[k + 1].Y * scale,
-                  ox + pts[k + 2].X * scale, baselineY - pts[k + 2].Y * scale);
-                Inc(k, 3);
-              end;
-            gcClose:
-              fCurrentPage.ClosePath;
+          if not face.TryGetOutline(gid, fFont.Bold, fFont.Italics, outline) then
+          begin
+            if ctx = nil then
+              ctx := TGdiFontContext.Create(face.GdiFamily, fFont.Bold, fFont.Italics,
+                ttf.Metrics.UnitsPerEm);
+            if not ctx.GlyphOutline(gid, outline) then
+              outline := Default(TGlyphOutline);
+            face.AddOutline(gid, fFont.Bold, fFont.Italics, outline);
           end;
+          pts := outline.Points;
+          ox := X + penUnits * scale;
+          k := 0;
+          for i := 0 to High(outline.Commands) do
+            case outline.Commands[i] of
+              gcMoveTo:
+                begin
+                  fCurrentPage.UserMoveTo(ox + pts[k].X * scale, baselineY - pts[k].Y * scale);
+                  Inc(k);
+                end;
+              gcLineTo:
+                begin
+                  fCurrentPage.UserLineTo(ox + pts[k].X * scale, baselineY - pts[k].Y * scale);
+                  Inc(k);
+                end;
+              gcCurveTo:
+                begin
+                  fCurrentPage.UserCurveTo(
+                    ox + pts[k].X * scale,     baselineY - pts[k].Y * scale,
+                    ox + pts[k + 1].X * scale, baselineY - pts[k + 1].Y * scale,
+                    ox + pts[k + 2].X * scale, baselineY - pts[k + 2].Y * scale);
+                  Inc(k, 3);
+                end;
+              gcClose:
+                fCurrentPage.ClosePath;
+            end;
+        end;
+        penUnits := penUnits + ttf.GlyphAdvance(gid);
       end;
-      penUnits := penUnits + ttf.GlyphAdvance(gid);
+    finally
+      fCurrentPage.EndPathCapture;
+      fCurrentPage.CoordDecimals := savedDecimals;
+      ctx.Free;
+    end;
+
+    if fCurrentPage.CapturedPathSize > 0 then
+    begin
+      halo := HaloActive;
+      underFill := halo and (fFont.StrokeMode = smUnderFill);
+      fCurrentPage.SaveState;
+      fCurrentPage.SetAlpha(fFont.Opacity, fFont.Opacity);
+      if halo then
+      begin
+        ColorToRGBFloats(fFont.StrokeColor, r, g, b);
+        fCurrentPage.SetStrokeRGB(r, g, b);
+      end;
+      if underFill then
+      begin
+        fCurrentPage.SetLineWidthPt(2 * HaloWidthPt(sizePt));
+        fCurrentPage.SetLineJoin(1);
+        fCurrentPage.SetLineCap(1);
+        fCurrentPage.AppendCapturedPath;
+        fCurrentPage.Stroke;
+      end;
+      ColorToRGBFloats(fFont.Color, r, g, b);
+      fCurrentPage.SetFillRGB(r, g, b);
+      fCurrentPage.AppendCapturedPath;
+      if halo and not underFill then
+      begin
+        fCurrentPage.SetLineWidthPt(HaloWidthPt(sizePt));
+        fCurrentPage.FillAndStrokeNonZero;
+      end
+      else
+        fCurrentPage.FillNonZero;
+      fCurrentPage.RestoreState;
     end;
   finally
-    fCurrentPage.EndPathCapture;
-    ctx.Free;
+    if rotated then
+      fCurrentPage.RestoreState;
   end;
-
-  if fCurrentPage.CapturedPathSize > 0 then
-  begin
-    halo := HaloActive;
-    underFill := halo and (fFont.StrokeMode = smUnderFill);
-    fCurrentPage.SaveState;
-    fCurrentPage.SetAlpha(fFont.Opacity, fFont.Opacity);
-    if halo then
-    begin
-      ColorToRGBFloats(fFont.StrokeColor, r, g, b);
-      fCurrentPage.SetStrokeRGB(r, g, b);
-    end;
-    if underFill then
-    begin
-      fCurrentPage.SetLineWidthPt(2 * HaloWidthPt(sizePt));
-      fCurrentPage.SetLineJoin(1);
-      fCurrentPage.SetLineCap(1);
-      fCurrentPage.AppendCapturedPath;
-      fCurrentPage.Stroke;
-    end;
-    ColorToRGBFloats(fFont.Color, r, g, b);
-    fCurrentPage.SetFillRGB(r, g, b);
-    fCurrentPage.AppendCapturedPath;
-    if halo and not underFill then
-    begin
-      fCurrentPage.SetLineWidthPt(HaloWidthPt(sizePt));
-      fCurrentPage.FillAndStrokeNonZero;
-    end
-    else
-      fCurrentPage.FillNonZero;
-    fCurrentPage.RestoreState;
-  end;
-
-  if rotated then
-    fCurrentPage.RestoreState;
 end;
 
 procedure TsmPDF.DrawText(const AText: string; ARect: TRect);

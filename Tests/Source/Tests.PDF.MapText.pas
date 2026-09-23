@@ -40,12 +40,14 @@ type
     procedure Test_Outlines_rotation_wrapsInCm;
     procedure Test_Outlines_missingCharacter_warns;
     procedure Test_Outlines_standardFontName_drawsWithGdiEquivalent;
+    procedure Test_Outlines_cachedPerStyle;
+    procedure Test_Outlines_ignoreCoordinatePrecision;
   end;
 
 implementation
 
 uses
-  StrUtils, Generics.Collections, Vcl.Graphics, smPDF, smPDF.GdiFonts;
+  StrUtils, RegularExpressions, Generics.Collections, Vcl.Graphics, smPDF, smPDF.GdiFonts;
 
 procedure TMapTextTests.RequireFont(const AFamily: string);
 begin
@@ -437,6 +439,48 @@ begin
   finally
     pdf.Free;
   end;
+end;
+
+procedure TMapTextTests.Test_Outlines_cachedPerStyle;
+var
+  plain, afterBold: string;
+begin
+  // Calibri Light has no bold face, so GDI simulates bold in the outline and
+  // regular and bold share one embedded face.
+  RequireFont('Calibri Light');
+  plain := Content(procedure(o: TObject)
+  begin
+    TsmPDF(o).Font.Name := 'Calibri Light';
+    TsmPDF(o).DrawTextOutlines('A', 10, 20);
+  end);
+  afterBold := Content(procedure(o: TObject)
+  begin
+    TsmPDF(o).Font.Name := 'Calibri Light';
+    TsmPDF(o).Font.Bold := True;
+    TsmPDF(o).DrawTextOutlines('A', 10, 20);
+    TsmPDF(o).Font.Bold := False;
+    TsmPDF(o).DrawTextOutlines('A', 10, 20);
+  end);
+  // GDI's simulated bold really is a different outline...
+  AssertFalse(StartsText(plain, afterBold), 'the bold outline differs from the regular one');
+  // ...and the regular glyph drawn after the bold one is the regular outline.
+  AssertTrue(EndsText(plain, afterBold), 'regular outline reused from the bold request');
+end;
+
+procedure TMapTextTests.Test_Outlines_ignoreCoordinatePrecision;
+var s: string;
+begin
+  RequireFont('Arial');
+  s := Content(procedure(o: TObject)
+  begin
+    TsmPDF(o).CoordinatePrecision := 0;
+    TsmPDF(o).Font.Name := 'Arial';
+    TsmPDF(o).Font.Size := 8;
+    TsmPDF(o).DrawTextOutlines('e', 10.5, 20);
+    TsmPDF(o).DrawLine(10.4, 20.4, 30.6, 40.6);
+  end);
+  AssertTrue(TRegEx.IsMatch(s, '\d+\.\d+ \d+\.\d+ m'), 'glyph path keeps decimals');
+  AssertContains('10 772 m', s, 'other paths still follow CoordinatePrecision');
 end;
 
 initialization

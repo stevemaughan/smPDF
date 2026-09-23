@@ -24,6 +24,7 @@ type
     procedure Test_SyntheticBold_emboldensWithFillColourStroke;
     procedure Test_RealBold_isNotEmboldened;
     procedure Test_EmbeddingRestricted_readsFsType;
+    procedure Test_ZeroTypoAscender_fallsBackToHhea;
     procedure Test_TwoThreads_resolveFontsIndependently;
   end;
 
@@ -280,6 +281,34 @@ begin
     Result := pdf.ToBytes;
   finally
     pdf.Free;
+  end;
+end;
+
+procedure TFontResolveTests.Test_ZeroTypoAscender_fallsBackToHhea;
+var
+  data: TBytes;
+  face: string;
+  ttf: TTTFFont;
+  os2, i, numTables: Integer;
+begin
+  if not GdiLoadFontData('Arial', False, False, data, face) then
+    Skip('Arial is not installed');
+  numTables := (data[4] shl 8) or data[5];
+  os2 := -1;
+  for i := 0 to numTables - 1 do
+    if (Char(data[12 + i * 16]) = 'O') and (Char(data[13 + i * 16]) = 'S') then
+      os2 := (data[12 + i * 16 + 8] shl 24) or (data[12 + i * 16 + 9] shl 16) or
+             (data[12 + i * 16 + 10] shl 8) or data[12 + i * 16 + 11];
+  AssertTrue(os2 > 0, 'OS/2 table found');
+  data[os2 + 68] := 0;   // sTypoAscender := 0
+  data[os2 + 69] := 0;
+  ttf := TTTFFont.CreateFromBytes(data, 'patched');
+  try
+    // Arial's hhea ascender and descender are 1854 and -434.
+    AssertEquals(1854, Integer(ttf.Metrics.Ascent));
+    AssertEquals(-434, Integer(ttf.Metrics.Descent));
+  finally
+    ttf.Free;
   end;
 end;
 

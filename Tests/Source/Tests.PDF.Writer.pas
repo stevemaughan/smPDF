@@ -50,6 +50,8 @@ type
     procedure Test_EmitStreamObject_emptyContent;
     procedure Test_EmitStreamObject_returnsObjectId;
     procedure Test_EmitStreamObject_contentBytesAreVerbatim;
+    procedure Test_WriteName_escapesSpacesAndDelimiters;
+    procedure Test_WriteName_nonAsciiIsUtf8Escaped;
   end;
 
 implementation
@@ -702,6 +704,40 @@ begin
     s := BytesToLatin1(w.Finalize(0));
     // The four content bytes should appear inside the stream segment in order.
     AssertContains('stream'#10'ABCD'#10'endstream', s);
+  finally
+    w.Free;
+  end;
+end;
+
+procedure TWriterTests.Test_WriteName_escapesSpacesAndDelimiters;
+var
+  w: TPDFWriter;
+  s: string;
+begin
+  w := TPDFWriter.Create;
+  try
+    w.BeginObject;
+    w.WriteName('My Font#(x)/y');
+    w.EndObject;
+    s := BytesToLatin1(w.Finalize(0));
+    AssertContains('/My#20Font#23#28x#29#2Fy', s);
+  finally
+    w.Free;
+  end;
+end;
+
+procedure TWriterTests.Test_WriteName_nonAsciiIsUtf8Escaped;
+var
+  w: TPDFWriter;
+  s: string;
+begin
+  w := TPDFWriter.Create;
+  try
+    w.BeginObject;
+    w.WriteName('A'#$00E9);
+    w.EndObject;
+    s := BytesToLatin1(w.Finalize(0));
+    AssertContains('/A#C3#A9', s);
   finally
     w.Free;
   end;

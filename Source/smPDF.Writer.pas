@@ -236,9 +236,29 @@ begin
 end;
 
 procedure TPDFWriter.WriteName(const AName: string);
+const
+  HEX: array[0..15] of Char = '0123456789ABCDEF';
+var
+  bytes: TBytes;
+  sb: TStringBuilder;
+  b: Byte;
 begin
   EmitSeparatorIfNeeded;
-  WriteAscii('/' + AName);
+  // Names are bytes: UTF-8, with #xx for anything outside the printable
+  // range and for PDF delimiters (a font name may contain spaces).
+  bytes := TEncoding.UTF8.GetBytes(AName);
+  sb := TStringBuilder.Create(Length(bytes) + 1);
+  try
+    sb.Append('/');
+    for b in bytes do
+      if (b < $21) or (b > $7E) or CharInSet(AnsiChar(b), ['(', ')', '<', '>', '[', ']', '{', '}', '/', '%', '#']) then
+        sb.Append('#').Append(HEX[b shr 4]).Append(HEX[b and $F])
+      else
+        sb.Append(Char(b));
+    WriteAscii(sb.ToString);
+  finally
+    sb.Free;
+  end;
   fNeedsSeparator := True;
 end;
 

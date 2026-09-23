@@ -423,10 +423,14 @@ begin
   fsSelection := ReadU16(off + 62);
   if (fsSelection and $1) <> 0 then
     fMetrics.IsItalic := True;
-  // sTypoAscender/Descender (signed, in font units)
-  fMetrics.Ascent  := ReadI16(off + 68);
-  fMetrics.Descent := ReadI16(off + 70);
-  fMetrics.LineGap := ReadI16(off + 72);
+  // sTypoAscender/Descender (signed, in font units). Kept from hhea when the
+  // table is too short or the typo ascender is unset.
+  if (e.Length >= 74) and (ReadI16(off + 68) > 0) then
+  begin
+    fMetrics.Ascent  := ReadI16(off + 68);
+    fMetrics.Descent := ReadI16(off + 70);
+    fMetrics.LineGap := ReadI16(off + 72);
+  end;
   if e.Length >= 78 then
   begin
     fMetrics.WinAscent  := ReadU16(off + 74);

@@ -70,7 +70,15 @@ begin
   newCap := Length(fData);
   if newCap < 16 then newCap := 16;
   while newCap < AMinCapacity do
+  begin
+    // Doubling past half the address range would overflow on Win32.
+    if newCap > High(NativeInt) div 2 then
+    begin
+      newCap := AMinCapacity;
+      Break;
+    end;
     newCap := newCap * 2;
+  end;
   SetLength(fData, newCap);
 end;
 

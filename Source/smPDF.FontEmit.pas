@@ -181,7 +181,9 @@ begin
   else
   begin
     closure := SubsetGlyphClosure(ttf, used);
-    fontName := MakeSubsetTag(m.PostScriptName, closure) + '+' + m.PostScriptName;
+    // The face key is unique in the document even when two fonts share a
+    // PostScript name, so their subsets get different tags.
+    fontName := MakeSubsetTag(AFace.Key, closure) + '+' + m.PostScriptName;
     program_ := BuildHollowSubset(ttf, used, charMap, fontName);
   end;
 
