@@ -257,10 +257,10 @@ begin
   pdf.Font.Size := 9;
   pdf.Font.Italics := True;
   pdf.DrawParagraph(
-    'Phase 3 limitations: WinAnsi (cp1252) only ' + #$2014 +
-    ' no Unicode beyond Latin-1; ' +
+    'The 14 standard fonts are WinAnsi (cp1252) only ' + #$2014 +
+    ' use an embedded TrueType font for anything else (page 8); ' +
     'Bold/Italic widths approximated from regular Helvetica/Times; ' +
-    'no kerning, no justified text. TrueType embedding lands in Phase 4.',
+    'no kerning, no justified text.',
     TRect.Create(50, y, 545, y + 80),
     taRightJustify, tpTight);
 end;
@@ -286,7 +286,7 @@ begin
   pdf.Font.Italics := True;
   pdf.Font.Size    := 12;
   pdf.Font.Color   := $00606060;
-  pdf.DrawText('Installed Windows fonts embedded as /FontFile2 streams', 50, 95);
+  pdf.DrawText('Installed Windows fonts, subset and embedded as CID fonts', 50, 95);
 
   // Section: Arial family (all 4 variants embedded as separate TTFs)
   y := 140;
@@ -295,7 +295,7 @@ begin
   pdf.Font.Bold    := True;
   pdf.Font.Color   := clBlack;
   pdf.Font.Size    := 11;
-  pdf.DrawText('Arial family (4 TTF files embedded):', 50, y);
+  pdf.DrawText('Arial family (4 faces, each subset):', 50, y);
   Inc(y, 22);
 
   pdf.Font.Name := 'Arial';
@@ -351,13 +351,12 @@ begin
   pdf.Font.Name := 'Courier';        pdf.DrawText('The quick brown fox jumps over the lazy dog.', 70, y); Inc(y, 22);
   pdf.Font.Name := 'Courier New';    pdf.DrawText('The quick brown fox jumps over the lazy dog.', 70, y); Inc(y, 30);
 
-  // Latin-1 supplement: characters that exist in WinAnsi but only render via TTF
-  // because Standard 14 metrics tables are ASCII-only in our impl.
+  // Accented text through an embedded TrueType font.
   pdf.Font.Name    := 'Helvetica';
   pdf.Font.Bold    := True;
   pdf.Font.Italics := False;
   pdf.Font.Size    := 11;
-  pdf.DrawText('Latin-1 supplement via embedded Arial:', 50, y);
+  pdf.DrawText('Accented text via embedded Arial:', 50, y);
   Inc(y, 22);
 
   pdf.Font.Name := 'Arial';
@@ -374,11 +373,11 @@ begin
   pdf.Font.Size    := 9;
   pdf.Font.Color   := $00606060;
   pdf.DrawParagraph(
-    'Phase 4 embeds the FULL TTF font as a /FontFile2 stream. File size grows ' +
-    'roughly by the size of each unique font face used (Arial regular ~1MB; ' +
-    'Calibri ~700KB; etc.). Subsetting can be added later as a Phase 6 polish ' +
-    'task to keep only the glyphs that are actually used. Encoding is still ' +
-    'WinAnsi (cp1252); full Unicode support requires CID fonts and is out of scope.',
+    'Fonts are found through GDI (so .ttc collections and per-user fonts work) ' +
+    'and embedded as subsets carrying only the glyphs drawn: a page of Arial ' +
+    'adds about 20 KB instead of 1 MB. Each TrueType font is a Type0 / ' +
+    'CIDFontType2 font with Identity-H encoding and a ToUnicode map, so any ' +
+    'character the font has can be drawn, searched and copied.',
     TRect.Create(50, y, 545, y + 100), taLeftJustify, tpSingle);
 end;
 
@@ -925,10 +924,166 @@ begin
   pdf.Font.Bold        := False;
 end;
 
+// ---- Page 8: smPDF 2.0 features ----
+
+procedure DrawSection(pdf: TsmPDF; const ATitle: string; Y: Double);
+begin
+  pdf.Font.Name := 'Helvetica';
+  pdf.Font.Bold := True;
+  pdf.Font.Italics := False;
+  pdf.Font.Size := 11;
+  pdf.Font.Color := clBlack;
+  pdf.Font.StrokeWidth := 0;
+  pdf.Brush.Style := brushClear;
+  pdf.DrawText(ATitle, 50, Y);
+end;
+
+procedure DrawUnicodeLine(pdf: TsmPDF; const AFamily, ACaption, AText: string; Y: Double);
+begin
+  pdf.Font.Name := 'Helvetica';
+  pdf.Font.Bold := False;
+  pdf.Font.Size := 9;
+  pdf.Font.Color := $00606060;
+  pdf.DrawText(ACaption, 70, Y + 3);
+  pdf.Font.Name := AFamily;
+  pdf.Font.Size := 14;
+  pdf.Font.Color := clBlack;
+  pdf.DrawText(AText, 190, Y);
+end;
+
+procedure DrawPage8Maps(pdf: TsmPDF);
+var
+  frame: TRectF;
+  ring: TArray<TPointF>;
+  y: Double;
+  i: Integer;
+  m: TPDFTextMetrics;
+  labels: array[0..2] of string;
+begin
+  pdf.Brush.Style := brushClear;
+  pdf.Pen.Style := penSolid;
+  pdf.Font.Name := 'Arial';
+  pdf.Font.Bold := True;
+  pdf.Font.Italics := False;
+  pdf.Font.Size := 28;
+  pdf.Font.Color := clBlack;
+  pdf.DrawText('smPDF 2.0 ' + #$2014 + ' Unicode and map text', 50, 50);
+
+  // Unicode through CID fonts.
+  y := 105;
+  DrawSection(pdf, 'Unicode text (each TrueType font is a Type0 font with Identity-H):', y);
+  y := y + 24;
+  DrawUnicodeLine(pdf, 'Arial', 'Polish, Czech, Hungarian', 'Łódź · Dvořák · Győr · Kraków · Brno', y);    y := y + 22;
+  DrawUnicodeLine(pdf, 'Arial', 'Vietnamese',               'Hà Nội · Hồ Chí Minh · Đà Nẵng', y);          y := y + 22;
+  DrawUnicodeLine(pdf, 'Arial', 'Greek, Cyrillic',          'Αθήνα · Θεσσαλονίκη · Москва · Київ', y);     y := y + 22;
+  DrawUnicodeLine(pdf, 'Microsoft YaHei', 'Chinese (YaHei)','北京市 · 上海市 · 广州市 · 深圳市', y);          y := y + 24;
+  DrawUnicodeLine(pdf, 'Yu Gothic', 'Japanese (Yu Gothic)', '東京都 · 大阪府 · 札幌市 · さいたま市', y);      y := y + 24;
+  DrawUnicodeLine(pdf, 'Malgun Gothic', 'Korean (Malgun)',  '서울특별시 · 부산광역시 · 인천', y);            y := y + 34;
+
+  // A small map: clip frame, poly-polygon with a hole, road, haloed labels, icons.
+  DrawSection(pdf, 'Map drawing: clip, poly-polygons, roads, halo labels, outline icons:', y);
+  y := y + 22;
+  frame := TRectF.Create(50, y, 545, y + 250);
+  pdf.Pen.Color := $00808080;
+  pdf.Pen.Width := 1;
+  pdf.Brush.Style := brushSolid;
+  pdf.Brush.Color := $00F4EEE6;
+  pdf.DrawRoundRect(frame, 10, 10);
+
+  pdf.PushClipRect(TRectF.Create(frame.Left + 4, frame.Top + 4, frame.Right - 4, frame.Bottom - 4));
+  // Territory with a lake: outer ring plus hole, explicit counts.
+  ring := TArray<TPointF>.Create(
+    TPointF.Create(20, y + 20),  TPointF.Create(330, y + 10), TPointF.Create(380, y + 150),
+    TPointF.Create(250, y + 280), TPointF.Create(30, y + 220),
+    TPointF.Create(150, y + 90), TPointF.Create(230, y + 80), TPointF.Create(240, y + 150),
+    TPointF.Create(160, y + 170));
+  pdf.Brush.Color := $00B8D8F0;
+  pdf.Pen.Color := $00406080;
+  pdf.Pen.Width := 1.2;
+  pdf.Pen.LineJoin := ljRound;
+  pdf.DrawPolyPolygon(ring, [5, 4], frEvenOdd);
+  ring := TArray<TPointF>.Create(
+    TPointF.Create(380, y + 150), TPointF.Create(600, y + 40), TPointF.Create(600, y + 300),
+    TPointF.Create(250, y + 280));
+  pdf.Brush.Color := $00C8E8C8;
+  pdf.DrawPolyPolygon(ring, [4], frNonZero);
+  // A road.
+  pdf.Pen.Color := $003070C0;
+  pdf.Pen.Width := 3;
+  pdf.Pen.LineCap := lcRound;
+  pdf.DrawPolyline(TArray<TPointF>.Create(TPointF.Create(40, y + 240), TPointF.Create(160, y + 200),
+    TPointF.Create(300, y + 215), TPointF.Create(420, y + 120), TPointF.Create(560, y + 110)));
+  pdf.Pen.LineCap := lcButt;
+
+  // Halo labels: stroke under the fill vs over it.
+  pdf.Brush.Style := brushClear;
+  pdf.TextOrigin := toGdiTop;
+  pdf.Font.Name := 'Oswald';
+  pdf.Font.Bold := False;
+  pdf.Font.Size := 15.5;
+  pdf.Font.Color := $00202020;
+  pdf.Font.StrokeColor := clWhite;
+  pdf.Font.StrokeWidth := 1.2;
+  pdf.Font.StrokeMode := smUnderFill;
+  pdf.DrawText('North East District', 80, y + 40);
+  pdf.Font.Size := 11;
+  pdf.DrawText('halo under fill (smUnderFill)', 80, y + 62);
+  pdf.Font.StrokeMode := smOverFill;
+  pdf.DrawText('stroke over fill (smOverFill)', 300, y + 62);
+  pdf.Font.StrokeMode := smUnderFill;
+  pdf.Font.Size := 12;
+  pdf.DrawText('Lake Winnipesaukee', 150, y + 185, 12);
+
+  // Rep icons drawn as vector outlines of Ionicons glyphs.
+  pdf.Font.Name := 'Ionicons';
+  pdf.Font.Size := 22;
+  pdf.Font.Color := $000030C0;
+  pdf.Font.StrokeWidth := 1;
+  for i := 0 to 3 do
+    pdf.DrawTextOutlines(#$F202, 420 + i * 28, y + 180);
+  pdf.DrawTextOutlines(#$F25D, 420 + 4 * 28, y + 180);
+  pdf.PopClip;
+  pdf.Font.StrokeWidth := 0;
+
+  // GDI metrics: stacked labels measured like TCanvas.
+  y := frame.Bottom + 24;
+  DrawSection(pdf, 'Labels stacked with GDI metrics (TextOrigin = toGdiTop; boxes are TextHeight):', y);
+  y := y + 24;
+  labels[0] := 'Worcester';
+  labels[1] := 'Charmain Speer';
+  labels[2] := '$5,457,842';
+  pdf.Font.Name := 'Oswald';
+  pdf.Font.Color := clBlack;
+  pdf.Pen.Color := $00C0C0C0;
+  pdf.Pen.Width := 0.5;
+  for i := 0 to 2 do
+  begin
+    pdf.Font.Size := 16 - i * 3;
+    m := pdf.FontMetrics;
+    pdf.Brush.Style := brushClear;
+    pdf.DrawBox(70, y, 70 + pdf.TextWidthF(labels[i]), y + m.LineHeight);
+    pdf.DrawText(labels[i], 70, y);
+    y := y + m.LineHeight;
+  end;
+  pdf.TextOrigin := toTypoTop;
+
+  pdf.Font.Name := 'Helvetica';
+  pdf.Font.Bold := False;
+  pdf.Font.Italics := True;
+  pdf.Font.Size := 9;
+  pdf.Font.Color := $00606060;
+  pdf.DrawParagraph(
+    'Fonts that are not installed fall back to Helvetica and are listed in ' +
+    'TsmPDF.Warnings, as is any character a font cannot show. Complex-script ' +
+    'shaping (Arabic, Indic, Thai) and right-to-left text are not supported.',
+    TRect.Create(50, Round(y) + 20, 545, Round(y) + 80), taLeftJustify, tpSingle);
+end;
+
 var
   pdf: TsmPDF;
   outDir, outFile: string;
   nBytes: Int64;
+  i: Integer;
 begin
   try
     outDir  := ExtractFilePath(ParamStr(0));
@@ -957,13 +1112,20 @@ begin
       pdf.NewPage(psA4, poPortrait,  72);
       DrawPage7Rotation(pdf);
 
+      pdf.NewPage(psA4, poPortrait,  72);
+      DrawPage8Maps(pdf);
+
+      pdf.Title := 'smPDF ' + SMPDF_VERSION + ' showcase';
+      for i := 0 to pdf.Warnings.Count - 1 do
+        Writeln('warning: ', pdf.Warnings[i]);
+
       nBytes := pdf.Save(outFile);
     finally
       pdf.Free;
     end;
 
     Writeln('OK: wrote ', outFile);
-    Writeln('     pages: 7');
+    Writeln('     pages: 8');
     Writeln('     bytes: ', nBytes);
     ExitCode := 0;
   except

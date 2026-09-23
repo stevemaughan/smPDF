@@ -6,9 +6,99 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Work towards **2.0.0**, the release that makes smPDF a replacement for Gnostice
-eDocEngine in AlignMix's map export. Several changes below alter output or
-break source compatibility; they are marked **Breaking**.
+## [2.0.0] — 2026-09-23
+
+The release that makes smPDF a replacement for Gnostice eDocEngine in
+AlignMix's map export: floating-point coordinates in points, explicit
+poly-polygons, clipping and paths, GDI-compatible map labels with halos,
+fonts resolved through GDI, subset, and written as CID fonts that carry any
+left-to-right Unicode script, and output that is compressed and several times
+faster.
+
+### Upgrading from 1.x (breaking changes)
+
+- **`Font.Size` is now `Double`.** Assignments compile unchanged; code that
+  passes `Font.Size` where an `Integer` is expected needs a `Round`.
+- **Delphi 10.1 Berlin or newer** is required (was XE8), for
+  `TBufferedFileStream`.
+- **Output moves by up to one pixel.** The Y flip is now `H − Y` rather than
+  `(H − 1) − Y`, so pixel `Y = 0` is the top edge of the page and
+  `Y = Height` the bottom edge. Text is no longer snapped to whole pixels.
+- **MediaBoxes use exact point sizes.** A4 is `595.28 × 841.89` at any DPI
+  (A4 at 300 DPI used to come out as `595.2 × 841.92`).
+- **TrueType fonts are written differently:** `Type0` / `CIDFontType2` with
+  `Identity-H`, subset, text as hex glyph ids. Anything that inspected the
+  old simple-font structure (`/Subtype /TrueType`, `/Widths`,
+  `/Encoding /WinAnsiEncoding` on TrueType fonts) must be updated.
+- **Standard 14 fonts no longer best-fit.** A character outside WinAnsi is
+  drawn as `?` with a warning; Windows' best-fit conversion used to turn `Ł`
+  into `L` silently.
+- **Fonts resolve through GDI**, so some families embed a different (correct)
+  face than before, e.g. `'Oswald'` now embeds Oswald Regular, not DemiBold.
+- **Page content is compressed.** `CompressStreams` defaulted to `True` but
+  was ignored; it is now honoured. Tests that inspect content bytes need
+  `CompressStreams := False`.
+- `TPDFResolvedFont` is no longer in the public interface, and the internal
+  unit `smPDF.WinFonts` is gone.
+
+### Added
+
+- `Warnings: TStrings` — every fallback the library had to make, one line each.
+- `CoordinatePrecision` (0–3 decimals, default 3) for path coordinates. At
+  72 DPI one decimal (0.1 pt) is still invisible in print and about halves the
+  compressed size of polygon-heavy pages; colours, widths and text keep three
+  decimals. The default output is unchanged.
+- Document information: `Title`, `Author`, `Subject`, `Creator`, `Producer`
+  (default `'smPDF ' + SMPDF_VERSION`) and `CreationDate` (default: when the
+  `TsmPDF` was created), written as an `/Info` dictionary referenced from the
+  trailer. Non-ASCII values are UTF-16BE with a byte-order mark.
+- `TextOrigin: TPDFTextOrigin` — `toTypoTop` (default, unchanged placement),
+  `toGdiTop` (Y is the top of GDI's cell: the baseline sits at `Y + usWinAscent`
+  and `TextHeight` is `usWinAscent + usWinDescent`, so labels measure and stack
+  exactly as `TCanvas` does), or `toBaseline` (Y is the baseline).
+- `FontMetrics: TPDFTextMetrics` — ascent, descent, line height, cap height and
+  x-height of the current font and size, in page pixels.
+- Map-label halos: `Font.StrokeWidth` (points; overrides the `StrokeStyle`
+  fraction when > 0) and `Font.StrokeMode`. `smUnderFill` strokes the text in
+  `StrokeColor` at twice `StrokeWidth` with round joins and caps, then fills it
+  on top, so `StrokeWidth` of halo shows outside the glyphs. `smOverFill` is the
+  existing render-mode-2 look.
+- `DrawTextOutlines(Text, X, Y, Angle)` — draws text as filled vector paths
+  from GDI glyph outlines (quadratic splines converted to cubics), honouring
+  `Font.Color`, halos, rotation and `TextOrigin`. For icon fonts such as
+  Ionicons and for fonts that cannot be embedded. Outlines are cached per
+  document.
+- `NewPage(AWidthPt, AHeightPt: Double; ADPI = 72; APaperColor = clWhite)` —
+  page size in points, used exactly for the MediaBox. At 72 DPI one drawing
+  pixel is one point, so callers can work in points directly.
+- `Double` overloads: `DrawLine`, `DrawBox`, `DrawOval`, `DrawText(s, X, Y, Angle)`,
+  `DrawPicture(Picture, TRectF, …)`, and `TPDFPointFList = TList<TPointF>`
+  overloads of `DrawMultiLine` and `DrawPolygon` (including the clip-rect form).
+- `TextWidthF`, `TextHeightF`, `TextExtentF` — unrounded measurements.
+- `DrawPolyPolygon(Points, Counts, FillRule)` (`TPointF` and `TPoint` open
+  arrays) — rings are given by explicit counts, so a ring that passes through
+  its own start point is no longer split. `DrawPolyline(Points, Count)` strokes
+  an open path. `TPDFFillRule = (frEvenOdd, frNonZero)`; non-zero fills emit
+  `f` / `B`. The Map demo now uses `DrawPolyPolygon` with unrounded coordinates.
+- Clip stack: `PushClipRect(TRectF | TRect)` / `PopClip` (`q`, `re`, `W n`, and
+  a matching `Q`). Clips still open when a page is written are closed then;
+  `PopClip` with nothing pushed on the current page raises `EPDFError`.
+- Path API: `BeginPath`, `MoveTo`, `LineTo`, `CurveTo`, `ClosePath`,
+  `FillPath(FillRule = frNonZero)`, `StrokePath`, `FillAndStrokePath`, painted
+  with the current Pen / Brush. Drawing, clipping, `NewPage` or saving while a
+  path is open raises `EPDFError`.
+- `DrawRoundRect(R: TRectF; RadiusX, RadiusY)`; radii are clamped to half the
+  rectangle, and a zero radius draws exactly what `DrawBox` draws.
+- `WidthPt`, `HeightPt` — the current page size in points.
+- `Tests/Bench/smPDF_Bench.dpr` — throughput benchmark (1M polygon vertices,
+  2,000 outlined labels, A0 at 72 DPI).
+- `Save(AStream: TStream)` overload — writes the PDF at the stream's current
+  position and returns the byte count, so output never has to touch the disk.
+- `ToBytes: TBytes` — returns the complete PDF as a byte array.
+- Stress demo (`Demos/Stress`): an A0 page shaped like AlignMix's map
+  export, and the acceptance vehicle for this release.
+- Showcase page 8: Unicode in seven scripts, a clipped mini-map with halo
+  labels and outline icons, GDI-metric label stacks.
 
 ### Changed
 
@@ -84,71 +174,37 @@ break source compatibility; they are marked **Breaking**.
 - `DrawParagraph` also breaks between any two CJK characters (ideographs,
   kana, Hangul), since those scripts do not use spaces. This is simple
   wrapping, not the full Unicode line-breaking algorithm.
+- `Save(AFileName)` no longer creates an empty file when it raises because no
+  pages were added.
+- `test.ps1` builds and runs the suite with both `dcc32` and `dcc64`.
 
 ### Removed
 
 - `smPDF.WinFonts` (registry-based font lookup), replaced by `smPDF.GdiFonts`.
 - `TTTFFont.CharWidthWinAnsi` (internal): widths come from glyph advances.
 
-### Added
+### Compatibility
 
-- `Warnings: TStrings` — every fallback the library had to make, one line each.
-- `CoordinatePrecision` (0–3 decimals, default 3) for path coordinates. At
-  72 DPI one decimal (0.1 pt) is still invisible in print and about halves the
-  compressed size of polygon-heavy pages; colours, widths and text keep three
-  decimals. The default output is unchanged.
-- Document information: `Title`, `Author`, `Subject`, `Creator`, `Producer`
-  (default `'smPDF ' + SMPDF_VERSION`) and `CreationDate` (default: when the
-  `TsmPDF` was created), written as an `/Info` dictionary referenced from the
-  trailer. Non-ASCII values are UTF-16BE with a byte-order mark.
-- `TextOrigin: TPDFTextOrigin` — `toTypoTop` (default, unchanged placement),
-  `toGdiTop` (Y is the top of GDI's cell: the baseline sits at `Y + usWinAscent`
-  and `TextHeight` is `usWinAscent + usWinDescent`, so labels measure and stack
-  exactly as `TCanvas` does), or `toBaseline` (Y is the baseline).
-- `FontMetrics: TPDFTextMetrics` — ascent, descent, line height, cap height and
-  x-height of the current font and size, in page pixels.
-- Map-label halos: `Font.StrokeWidth` (points; overrides the `StrokeStyle`
-  fraction when > 0) and `Font.StrokeMode`. `smUnderFill` strokes the text in
-  `StrokeColor` at twice `StrokeWidth` with round joins and caps, then fills it
-  on top, so `StrokeWidth` of halo shows outside the glyphs. `smOverFill` is the
-  existing render-mode-2 look.
-- `DrawTextOutlines(Text, X, Y, Angle)` — draws text as filled vector paths
-  from GDI glyph outlines (quadratic splines converted to cubics), honouring
-  `Font.Color`, halos, rotation and `TextOrigin`. For icon fonts such as
-  Ionicons and for fonts that cannot be embedded. Outlines are cached per
-  document.
-- `NewPage(AWidthPt, AHeightPt: Double; ADPI = 72; APaperColor = clWhite)` —
-  page size in points, used exactly for the MediaBox. At 72 DPI one drawing
-  pixel is one point, so callers can work in points directly.
-- `Double` overloads: `DrawLine`, `DrawBox`, `DrawOval`, `DrawText(s, X, Y, Angle)`,
-  `DrawPicture(Picture, TRectF, …)`, and `TPDFPointFList = TList<TPointF>`
-  overloads of `DrawMultiLine` and `DrawPolygon` (including the clip-rect form).
-- `TextWidthF`, `TextHeightF`, `TextExtentF` — unrounded measurements.
-- `DrawPolyPolygon(Points, Counts, FillRule)` (`TPointF` and `TPoint` open
-  arrays) — rings are given by explicit counts, so a ring that passes through
-  its own start point is no longer split. `DrawPolyline(Points, Count)` strokes
-  an open path. `TPDFFillRule = (frEvenOdd, frNonZero)`; non-zero fills emit
-  `f` / `B`. The Map demo now uses `DrawPolyPolygon` with unrounded coordinates.
-- Clip stack: `PushClipRect(TRectF | TRect)` / `PopClip` (`q`, `re`, `W n`, and
-  a matching `Q`). Clips still open when a page is written are closed then;
-  `PopClip` with nothing pushed on the current page raises `EPDFError`.
-- Path API: `BeginPath`, `MoveTo`, `LineTo`, `CurveTo`, `ClosePath`,
-  `FillPath(FillRule = frNonZero)`, `StrokePath`, `FillAndStrokePath`, painted
-  with the current Pen / Brush. Drawing, clipping, `NewPage` or saving while a
-  path is open raises `EPDFError`.
-- `DrawRoundRect(R: TRectF; RadiusX, RadiusY)`; radii are clamped to half the
-  rectangle, and a zero radius draws exactly what `DrawBox` draws.
-- `WidthPt`, `HeightPt` — the current page size in points.
-- `Tests/Bench/smPDF_Bench.dpr` — throughput benchmark (1M polygon vertices,
-  2,000 outlined labels, A0 at 72 DPI).
-- `Save(AStream: TStream)` overload — writes the PDF at the stream's current
-  position and returns the byte count, so output never has to touch the disk.
-- `ToBytes: TBytes` — returns the complete PDF as a byte array.
+- Delphi 10.1 Berlin or newer; tested with RAD Studio 13 (compiler 37.0),
+  Win32 and Win64.
+- Windows only (fonts come from GDI).
 
-### Changed
+### Performance
 
-- `Save(AFileName)` no longer creates an empty file when it raises because no
-  pages were added.
+Measured on the benchmark (1,008,000 polygon vertices and 2,000 outlined labels
+on an A0 page, Win64 release build):
+
+| | 1.0 | 2.0.0 |
+|---|---|---|
+| Polygons | ~197 ms | ~50 ms |
+| Labels | ~875 ms | ~4 ms |
+| Save (incl. compression) | ~10 ms, uncompressed | ~140 ms |
+| Total | ~945–1,089 ms | ~193 ms |
+| Output | 12.2 MB | 3.4 MB |
+
+The stress demo (1,048,766 polygon vertices, 36,000 road vertices, 2,200
+labels in five scripts, 200 outline icons) builds and saves in about 0.4 s,
+writing 3.4 MB at `CoordinatePrecision = 1` (6.8 MB at the default 3).
 
 ## [1.0.0] — 2026-05-03
 
