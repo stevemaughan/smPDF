@@ -109,6 +109,26 @@ type
     function FaceHasGlyph(AFace: TPDFFontFace; ACodepoint: Cardinal): Boolean;
   end;
 
+  // The primary font followed by fallback families. A fallback is resolved the
+  // first time a character reaches it, because loading a font such as
+  // Microsoft YaHei costs tens of milliseconds and most text never needs it.
+  TPDFFallbackChain = class
+  strict private
+    fRegistry:    TPDFFontRegistry;
+    fFamilies:    TArray<string>;
+    fBold:        Boolean;
+    fItalic:      Boolean;
+    fTried:       TArray<Boolean>;
+    fResolutions: TArray<TPDFFontResolution>;
+  public
+    constructor Create(ARegistry: TPDFFontRegistry; const APrimary: TPDFFontResolution;
+      const AFallbacks: string; ABold, AItalic: Boolean);
+    function Count: Integer;
+    // Entry 0 is the primary. False when the family is not installed, which
+    // adds a warning the first time it is tried.
+    function TryGet(AIndex: Integer; out AResolution: TPDFFontResolution): Boolean;
+  end;
+
 // Code points of a Delphi string: surrogate pairs combined, lone surrogates
 // replaced by U+FFFD, control characters by a space.
 function TextToCodepoints(const AText: string): TArray<Cardinal>;
@@ -485,6 +505,56 @@ end;
 function TPDFFontRegistry.Faces: TArray<TPDFFontFace>;
 begin
   Result := fFaces.ToArray;
+end;
+
+{ TPDFFallbackChain }
+
+constructor TPDFFallbackChain.Create(ARegistry: TPDFFontRegistry; const APrimary: TPDFFontResolution;
+  const AFallbacks: string; ABold, AItalic: Boolean);
+var
+  list: TList<string>;
+  family: string;
+begin
+  inherited Create;
+  fRegistry := ARegistry;
+  fBold := ABold;
+  fItalic := AItalic;
+  list := TList<string>.Create;
+  try
+    list.Add('');   // the primary, already resolved
+    for family in AFallbacks.Split([';']) do
+      if Trim(family) <> '' then
+        list.Add(Trim(family));
+    fFamilies := list.ToArray;
+  finally
+    list.Free;
+  end;
+  SetLength(fTried, Length(fFamilies));
+  SetLength(fResolutions, Length(fFamilies));
+  fTried[0] := True;
+  fResolutions[0] := APrimary;
+end;
+
+function TPDFFallbackChain.Count: Integer;
+begin
+  Result := Length(fFamilies);
+end;
+
+function TPDFFallbackChain.TryGet(AIndex: Integer; out AResolution: TPDFFontResolution): Boolean;
+var
+  std: TStandardFont;
+begin
+  if not fTried[AIndex] then
+  begin
+    fTried[AIndex] := True;
+    if TryResolveStandardFont(fFamilies[AIndex], fBold, fItalic, std) or
+       GdiFontInstalled(fFamilies[AIndex]) then
+      fResolutions[AIndex] := fRegistry.Resolve(fFamilies[AIndex], fBold, fItalic)
+    else
+      fRegistry.Warn(Format('Fallback font "%s" is not installed; it was skipped.', [fFamilies[AIndex]]));
+  end;
+  AResolution := fResolutions[AIndex];
+  Result := AResolution.Face <> nil;
 end;
 
 end.

@@ -1,6 +1,6 @@
 # smPDF — pure-Pascal PDF export library for Delphi
 
-![Version 2.1.0](https://img.shields.io/badge/version-2.1.0-blue.svg)
+![Version 2.1.1](https://img.shields.io/badge/version-2.1.1-blue.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Delphi 10.1 Berlin+](https://img.shields.io/badge/Delphi-10.1%20Berlin%2B-red.svg)
 ![PDF 1.4](https://img.shields.io/badge/PDF-1.4-blue.svg)
@@ -378,6 +378,12 @@ Windows itself links to that family, then Segoe UI, Microsoft YaHei, Yu Gothic,
 Malgun Gothic and Nirmala UI. With `FallbackFonts` empty (the default), a
 missing character is drawn as the main font's missing-glyph box and warned
 about.
+
+Fallback fonts are loaded only when needed. A family is loaded the first time a
+character is missing from the main font and from every family before it in the
+list, so setting a long list costs nothing on text the main font can show. A
+character that no font in the list has will load every family in the list,
+once per document, to find that out.
 
 ## Encoding
 

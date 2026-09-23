@@ -11,7 +11,7 @@ uses
 const
   // SemVer string, bumped per https://semver.org/. Read at runtime via
   // SMPDF_VERSION; useful for diagnostics, About boxes, and bug reports.
-  SMPDF_VERSION = '2.1.0';
+  SMPDF_VERSION = '2.1.1';
 
 type
   EPDFError = class(Exception);
@@ -168,7 +168,7 @@ type
     fProducer:          string;
     fCreationDate:      TDateTime;
     fCoordinatePrecision: Integer;
-    fFallbackChains:    TDictionary<string, TArray<TPDFFontResolution>>;
+    fFallbackChains:    TObjectDictionary<string, TPDFFallbackChain>;
 
     procedure StartPage(AWidthPt, AHeightPt: Double; ADPI: Integer; APaperColor: TColor);
     procedure EnsureCurrentPage;
@@ -199,7 +199,7 @@ type
 
     function ResolveCurrentFont: TPDFFontResolution;
     function ShapeText(const AText: string; ARecord: Boolean): TPDFGlyphRuns;
-    function FallbackChain: TArray<TPDFFontResolution>;
+    function FallbackChain: TPDFFallbackChain;
     function TextWidthPt(const AText: string; ASizePt: Double): Double;
     function WrapLines(const AText: string; ASizePt, AMaxWidthPt: Double): TStringList;
     procedure EmitGlyphRuns(const ARuns: TPDFGlyphRuns; X, ABaselineY, ASizePt: Double;
@@ -214,6 +214,9 @@ type
     function GetWidth: Integer;
     procedure SetCoordinatePrecision(AValue: Integer);
     function GetHeight: Integer;
+  protected
+    // For tests: every font face this document has loaded so far.
+    function LoadedFontFaces: TArray<TPDFFontFace>;
   public
     constructor Create;
     destructor  Destroy; override;
@@ -429,7 +432,7 @@ begin
   fFont              := TPDFFont.Create;
   fPages             := TObjectList<TPDFPage>.Create(True);
   fWarnings          := TStringList.Create;
-  fFallbackChains    := TDictionary<string, TArray<TPDFFontResolution>>.Create;
+  fFallbackChains    := TObjectDictionary<string, TPDFFallbackChain>.Create([doOwnsValues]);
   fFonts             := TPDFFontRegistry.Create(fWarnings);
   fImageData         := TDictionary<string, TPDFImageData>.Create;
   fImageKeyByPicture := TDictionary<TObject, string>.Create;
@@ -496,6 +499,11 @@ end;
 function TsmPDF.GetWarnings: TStrings;
 begin
   Result := fWarnings;
+end;
+
+function TsmPDF.LoadedFontFaces: TArray<TPDFFontFace>;
+begin
+  Result := fFonts.Faces;
 end;
 
 function TsmPDF.ResolveCurrentFont: TPDFFontResolution;
@@ -1378,41 +1386,26 @@ end;
 // Text
 // ------------------------------------------------------------------
 
-// The primary font followed by each installed fallback, resolved with the
-// current Bold / Italics. Cached per font setting.
-function TsmPDF.FallbackChain: TArray<TPDFFontResolution>;
+// The primary font followed by the fallbacks, with the current Bold / Italics.
+// Cached per font setting.
+function TsmPDF.FallbackChain: TPDFFallbackChain;
 var
-  key, family: string;
-  list: TList<TPDFFontResolution>;
-  std: TStandardFont;
+  key: string;
 begin
   key := LowerCase(fFont.Name + '|' + fFont.FallbackFonts) + '|' +
     BoolToStr(fFont.Bold, True) + '|' + BoolToStr(fFont.Italics, True);
   if fFallbackChains.TryGetValue(key, Result) then Exit;
-  list := TList<TPDFFontResolution>.Create;
-  try
-    list.Add(ResolveCurrentFont);
-    for family in fFont.FallbackFonts.Split([';']) do
-    begin
-      if Trim(family) = '' then Continue;
-      if TryResolveStandardFont(Trim(family), fFont.Bold, fFont.Italics, std) or
-         GdiFontInstalled(Trim(family)) then
-        list.Add(fFonts.Resolve(Trim(family), fFont.Bold, fFont.Italics))
-      else
-        fFonts.Warn(Format('Fallback font "%s" is not installed; it was skipped.', [Trim(family)]));
-    end;
-    Result := list.ToArray;
-  finally
-    list.Free;
-  end;
+  Result := TPDFFallbackChain.Create(fFonts, ResolveCurrentFont, fFont.FallbackFonts,
+    fFont.Bold, fFont.Italics);
   fFallbackChains.Add(key, Result);
 end;
 
 function TsmPDF.ShapeText(const AText: string; ARecord: Boolean): TPDFGlyphRuns;
 var
   cps: TArray<Cardinal>;
-  chain: TArray<TPDFFontResolution>;
+  chain: TPDFFallbackChain;
   runs: TList<TPDFGlyphRun>;
+  res: TPDFFontResolution;
   i, k, runStart, runFont, charFont: Integer;
 begin
   cps := TextToCodepoints(AText);
@@ -1425,6 +1418,8 @@ begin
 
   // Each character goes to the first font in the chain that has it; characters
   // no font has stay with the primary, which shows its missing-glyph box.
+  // Walking the chain in order means a fallback is only loaded once a
+  // character is missing from every font before it.
   chain := FallbackChain;
   runs := TList<TPDFGlyphRun>.Create;
   try
@@ -1433,21 +1428,25 @@ begin
     for i := 0 to High(cps) do
     begin
       charFont := 0;
-      for k := 0 to High(chain) do
-        if fFonts.FaceHasGlyph(chain[k].Face, cps[i]) then
+      for k := 0 to chain.Count - 1 do
+        if chain.TryGet(k, res) and fFonts.FaceHasGlyph(res.Face, cps[i]) then
         begin
           charFont := k;
           Break;
         end;
       if (runFont >= 0) and (charFont <> runFont) then
       begin
-        runs.Add(fFonts.EncodeRun(chain[runFont], cps, runStart, i - runStart, ARecord));
+        chain.TryGet(runFont, res);
+        runs.Add(fFonts.EncodeRun(res, cps, runStart, i - runStart, ARecord));
         runStart := i;
       end;
       runFont := charFont;
     end;
     if runFont >= 0 then
-      runs.Add(fFonts.EncodeRun(chain[runFont], cps, runStart, Length(cps) - runStart, ARecord));
+    begin
+      chain.TryGet(runFont, res);
+      runs.Add(fFonts.EncodeRun(res, cps, runStart, Length(cps) - runStart, ARecord));
+    end;
     Result := runs.ToArray;
   finally
     runs.Free;

@@ -19,6 +19,9 @@ type
     procedure Test_Fallback_characterNoFontHas_usesPrimaryAndWarns;
     procedure Test_Fallback_notInstalled_isSkippedWithWarning;
     procedure Test_Fallback_textExtractsWithMutool;
+    procedure Test_Lazy_textThePrimaryCovers_loadsNoFallback;
+    procedure Test_Lazy_loadsOnlyTheFallbacksANeedReaches;
+    procedure Test_Lazy_notInstalled_warnsOnlyWhenNeeded;
     procedure Test_SystemFallbackFonts_withoutLink_isDefaultList;
     procedure Test_SystemFallbackFonts_excludesTheFamilyItself;
   end;
@@ -26,10 +29,22 @@ type
 implementation
 
 uses
-  StrUtils, RegularExpressions, smPDF, smPDF.GdiFonts;
+  StrUtils, Types, RegularExpressions, smPDF, smPDF.GdiFonts, smPDF.FontRegistry;
 
 const
   MIXED = 'Beijing '#$5317#$4EAC;
+
+type
+  TsmPDFAccess = class(TsmPDF);
+
+function FamilyLoaded(APdf: TsmPDF; const AFamily: string): Boolean;
+var
+  face: TPDFFontFace;
+begin
+  for face in TsmPDFAccess(APdf).LoadedFontFaces do
+    if SameText(face.GdiFamily, AFamily) then Exit(True);
+  Result := False;
+end;
 
 procedure TFallbackTests.RequireFonts;
 begin
@@ -157,6 +172,70 @@ begin
   if not MutoolExtractText(BuildMixed('Microsoft YaHei', warnings, True), extracted) then
     Skip('mutool is not on the PATH');
   AssertEquals(MIXED, extracted);
+end;
+
+procedure TFallbackTests.Test_Lazy_textThePrimaryCovers_loadsNoFallback;
+var
+  pdf: TsmPDF;
+begin
+  RequireFonts;
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage(612, 792);
+    pdf.Font.Name := 'Oswald';
+    pdf.Font.FallbackFonts := 'Microsoft YaHei';
+    pdf.TextWidthF('Beijing');
+    pdf.DrawText('Beijing', 20, 20);
+    pdf.DrawParagraph('Beijing is the capital', Rect(20, 60, 200, 200), taLeftJustify, tpSingle);
+    pdf.ToBytes;
+    AssertTrue(FamilyLoaded(pdf, 'Oswald'), 'the primary is loaded');
+    AssertFalse(FamilyLoaded(pdf, 'Microsoft YaHei'), 'no character needed the fallback');
+    AssertEquals(0, pdf.Warnings.Count, pdf.Warnings.Text);
+  finally
+    pdf.Free;
+  end;
+end;
+
+procedure TFallbackTests.Test_Lazy_loadsOnlyTheFallbacksANeedReaches;
+var
+  pdf: TsmPDF;
+begin
+  RequireFonts;
+  if not GdiFontInstalled('Segoe UI') then Skip('Segoe UI is not installed');
+  if not GdiFontInstalled('Yu Gothic') then Skip('Yu Gothic is not installed');
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage(612, 792);
+    pdf.Font.Name := 'Oswald';
+    pdf.Font.FallbackFonts := 'Segoe UI;Microsoft YaHei;Yu Gothic';
+    pdf.DrawText(MIXED, 20, 20);
+    AssertTrue(FamilyLoaded(pdf, 'Segoe UI'), 'Segoe UI was tried first');
+    AssertTrue(FamilyLoaded(pdf, 'Microsoft YaHei'), 'YaHei has the characters');
+    AssertFalse(FamilyLoaded(pdf, 'Yu Gothic'), 'nothing reached Yu Gothic');
+    AssertEquals(0, pdf.Warnings.Count, pdf.Warnings.Text);
+  finally
+    pdf.Free;
+  end;
+end;
+
+procedure TFallbackTests.Test_Lazy_notInstalled_warnsOnlyWhenNeeded;
+var
+  pdf: TsmPDF;
+begin
+  RequireFonts;
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage(612, 792);
+    pdf.Font.Name := 'Oswald';
+    pdf.Font.FallbackFonts := 'No Such Font 7;Microsoft YaHei';
+    pdf.DrawText('Beijing', 20, 20);
+    AssertEquals(0, pdf.Warnings.Count, pdf.Warnings.Text);
+    pdf.DrawText(#$5317#$4EAC, 20, 60);
+    AssertEquals(1, pdf.Warnings.Count, pdf.Warnings.Text);
+    AssertContains('Fallback font "No Such Font 7" is not installed', pdf.Warnings[0]);
+  finally
+    pdf.Free;
+  end;
 end;
 
 procedure TFallbackTests.Test_SystemFallbackFonts_withoutLink_isDefaultList;

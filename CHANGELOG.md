@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.1.1] — 2026-09-23
+
+### Changed
+
+- **Fallback fonts load lazily.** A family in `Font.FallbackFonts` is now
+  loaded the first time a character is missing from the primary font and every
+  family before it, not as soon as any text is drawn or measured. Text the
+  primary font covers never loads a fallback, so an English-only page with
+  `SystemFallbackFonts('Oswald')` costs the same as one with no list (1.8 ms
+  against 97.8 ms per Letter page of 300 labels, Win64). A page with one Chinese
+  label loads only Segoe UI and Microsoft YaHei (44 ms, from 99 ms). Output is
+  unchanged.
+- The "Fallback font "X" is not installed" warning now appears only when a
+  character actually needs that family, not whenever the list is used.
+
+### Added
+
+- `Tests/Bench/smPDF_FallbackBench.dpr`, the fallback-font timing above
+  (`build-bench.ps1 -Program smPDF_FallbackBench`).
+
 ## [2.1.0] — 2026-09-23
 
 ### Added
