@@ -64,7 +64,8 @@ var
   pts: TPDFPointList;
   i, vertices: Integer;
   cx, cy, radius: Double;
-  swTotal, swDraw, swSave: TStopwatch;
+  swTotal, swDraw, swSave, swLabels: TStopwatch;
+  polyMs: Int64;
   outFile: string;
   bytes: Int64;
 begin
@@ -95,6 +96,8 @@ begin
         pdf.DrawPolygon(pts);
       end;
 
+      polyMs := swDraw.ElapsedMilliseconds;
+      swLabels := TStopwatch.StartNew;
       pdf.Brush.Style := brushClear;
       pdf.Font.Name := 'Arial';
       pdf.Font.Size := 9;
@@ -104,6 +107,7 @@ begin
       for i := 0 to LABEL_COUNT - 1 do
         pdf.DrawText('Territory ' + IntToStr(i),
           Round(20 + NextRandom * (PAGE_W - 120)), Round(20 + NextRandom * (PAGE_H - 40)));
+      swLabels.Stop;
       swDraw.Stop;
 
       swSave := TStopwatch.StartNew;
@@ -117,7 +121,8 @@ begin
 
     Writeln(Format('Vertices:        %d', [vertices]));
     Writeln(Format('Labels:          %d', [LABEL_COUNT]));
-    Writeln(Format('Draw time:       %d ms', [swDraw.ElapsedMilliseconds]));
+    Writeln(Format('Draw time:       %d ms (polygons %d ms, labels %d ms)',
+      [swDraw.ElapsedMilliseconds, polyMs, swLabels.ElapsedMilliseconds]));
     Writeln(Format('Save time:       %d ms', [swSave.ElapsedMilliseconds]));
     Writeln(Format('Total time:      %d ms', [swTotal.ElapsedMilliseconds]));
     Writeln(Format('Output size:     %.2f MB (%d bytes)', [bytes / (1024 * 1024), bytes]));

@@ -10,20 +10,26 @@ type
 
   TPDFWriter = class
   strict private
-    fStream: TBytesStream;
+    fStream: TStream;
+    fOwnsStream: Boolean;
+    fPosition: Int64;      // bytes written so far; xref offsets are relative to the %PDF header
     fNextId: Integer;
     fOffsets: array of Int64;
+    fWritten: array of Boolean;
     fInDictOrArray: Integer;
     fNeedsSeparator: Boolean;
 
     procedure WriteRawBytes(const ABytes: array of Byte); overload;
-    procedure WriteRawBytes(const ABytes: TBytes); overload;
+    procedure WriteRawBytes(AData: Pointer; ACount: NativeInt); overload;
     procedure WriteAscii(const AStr: string);
     procedure WriteHeader;
     procedure EmitSeparatorIfNeeded;
     procedure RegisterOffset(AObjectId: TPDFObjectId);
   public
-    constructor Create;
+    // Writes into an internal memory stream; Finalize returns the bytes.
+    constructor Create; overload;
+    // Writes straight into AStream at its current position; the caller owns it.
+    constructor Create(AStream: TStream); overload;
     destructor Destroy; override;
 
     function BeginObject: TPDFObjectId;
@@ -42,9 +48,11 @@ type
     // for embedded font files) before /Length is appended.
     function EmitStreamObject(const AContent: TBytes;
       const AExtraDictEntries: TProc<TPDFWriter>): TPDFObjectId; overload;
+    function EmitStreamObject(AData: Pointer; ACount: NativeInt;
+      const AExtraDictEntries: TProc<TPDFWriter>): TPDFObjectId; overload;
 
     procedure WriteName(const AName: string);
-    procedure WriteInt(AValue: Integer);
+    procedure WriteInt(AValue: Int64);
     procedure WriteNumber(AValue: Double);
     procedure WriteRef(AObjectId: TPDFObjectId);
     procedure WriteBool(AValue: Boolean);
@@ -61,6 +69,9 @@ type
     function CurrentOffset: Int64;
     function ObjectCount: Integer;
 
+    // Writes the xref table and trailer. AInfoObjectId = 0 omits /Info.
+    procedure Finish(ARootObjectId: TPDFObjectId; AInfoObjectId: TPDFObjectId = 0);
+    // Finish, then return everything written. Only for the parameterless constructor.
     function Finalize(ARootObjectId: TPDFObjectId): TBytes;
   end;
 
@@ -70,7 +81,6 @@ uses
   smPDF.Geometry;
 
 const
-  LF: Byte = $0A;
   PDF_HEADER: array[0..8] of Byte =
     (Ord('%'), Ord('P'), Ord('D'), Ord('F'), Ord('-'), Ord('1'), Ord('.'), Ord('4'), $0A);
   // High-bit comment marking the file as binary per PDF spec section 7.5.2
@@ -79,8 +89,16 @@ const
 
 constructor TPDFWriter.Create;
 begin
+  Create(TBytesStream.Create);
+  fOwnsStream := True;
+end;
+
+constructor TPDFWriter.Create(AStream: TStream);
+begin
   inherited Create;
-  fStream := TBytesStream.Create;
+  fStream := AStream;
+  fOwnsStream := False;
+  fPosition := 0;
   fNextId := 1;
   fInDictOrArray := 0;
   fNeedsSeparator := False;
@@ -89,32 +107,39 @@ end;
 
 destructor TPDFWriter.Destroy;
 begin
-  fStream.Free;
+  if fOwnsStream then
+    fStream.Free;
   inherited;
 end;
 
 procedure TPDFWriter.WriteRawBytes(const ABytes: array of Byte);
 begin
   if Length(ABytes) > 0 then
-    fStream.WriteBuffer(ABytes[0], Length(ABytes));
+    WriteRawBytes(@ABytes[0], Length(ABytes));
 end;
 
-procedure TPDFWriter.WriteRawBytes(const ABytes: TBytes);
+procedure TPDFWriter.WriteRawBytes(AData: Pointer; ACount: NativeInt);
 begin
-  if Length(ABytes) > 0 then
-    fStream.WriteBuffer(ABytes[0], Length(ABytes));
+  if ACount <= 0 then Exit;
+  fStream.WriteBuffer(AData^, ACount);
+  Inc(fPosition, ACount);
 end;
 
 procedure TPDFWriter.WriteAscii(const AStr: string);
 var
-  bytes: TBytes;
-  i: Integer;
+  buf: array[0..255] of Byte;
+  i, n, start: Integer;
 begin
-  if AStr = '' then Exit;
-  SetLength(bytes, Length(AStr));
-  for i := 1 to Length(AStr) do
-    bytes[i - 1] := Byte(Ord(AStr[i]) and $FF);
-  WriteRawBytes(bytes);
+  start := 1;
+  while start <= Length(AStr) do
+  begin
+    n := Length(AStr) - start + 1;
+    if n > Length(buf) then n := Length(buf);
+    for i := 0 to n - 1 do
+      buf[i] := Byte(Ord(AStr[start + i]) and $FF);
+    WriteRawBytes(@buf[0], n);
+    Inc(start, n);
+  end;
 end;
 
 procedure TPDFWriter.WriteHeader;
@@ -135,8 +160,12 @@ end;
 procedure TPDFWriter.RegisterOffset(AObjectId: TPDFObjectId);
 begin
   if Length(fOffsets) < AObjectId then
+  begin
     SetLength(fOffsets, AObjectId);
-  fOffsets[AObjectId - 1] := fStream.Position;
+    SetLength(fWritten, AObjectId);
+  end;
+  fOffsets[AObjectId - 1] := fPosition;
+  fWritten[AObjectId - 1] := True;
 end;
 
 function TPDFWriter.BeginObject: TPDFObjectId;
@@ -153,15 +182,18 @@ begin
   Result := fNextId;
   Inc(fNextId);
   if Length(fOffsets) < Result then
+  begin
     SetLength(fOffsets, Result);
-  // Offset stays 0 until BeginReservedObject is called. Finalize() asserts on this.
+    SetLength(fWritten, Result);
+  end;
+  // Stays unwritten until BeginReservedObject is called. Finish() asserts on this.
 end;
 
 procedure TPDFWriter.BeginReservedObject(AObjectId: TPDFObjectId);
 begin
   if (AObjectId < 1) or (AObjectId >= fNextId) then
     raise EAssertionFailed.CreateFmt('Object id %d not reserved', [AObjectId]);
-  if fOffsets[AObjectId - 1] <> 0 then
+  if fWritten[AObjectId - 1] then
     raise EAssertionFailed.CreateFmt('Object id %d already written', [AObjectId]);
   RegisterOffset(AObjectId);
   WriteAscii(IntToStr(AObjectId) + ' 0 obj' + #10);
@@ -176,15 +208,23 @@ end;
 function TPDFWriter.EmitStreamObject(const AContent: TBytes;
   const AExtraDictEntries: TProc<TPDFWriter>): TPDFObjectId;
 begin
+  if Length(AContent) = 0 then
+    Result := EmitStreamObject(nil, 0, AExtraDictEntries)
+  else
+    Result := EmitStreamObject(@AContent[0], Length(AContent), AExtraDictEntries);
+end;
+
+function TPDFWriter.EmitStreamObject(AData: Pointer; ACount: NativeInt;
+  const AExtraDictEntries: TProc<TPDFWriter>): TPDFObjectId;
+begin
   Result := BeginObject;
     BeginDict;
       if Assigned(AExtraDictEntries) then
         AExtraDictEntries(Self);
-      WriteName('Length'); WriteInt(Length(AContent));
+      WriteName('Length'); WriteInt(ACount);
     EndDict;
     WriteAscii(#10 + 'stream' + #10);
-    if Length(AContent) > 0 then
-      WriteRawBytes(AContent);
+    WriteRawBytes(AData, ACount);
     WriteAscii(#10 + 'endstream');
   EndObject;
 end;
@@ -202,7 +242,7 @@ begin
   fNeedsSeparator := True;
 end;
 
-procedure TPDFWriter.WriteInt(AValue: Integer);
+procedure TPDFWriter.WriteInt(AValue: Int64);
 begin
   EmitSeparatorIfNeeded;
   WriteAscii(IntToStr(AValue));
@@ -219,7 +259,7 @@ end;
 procedure TPDFWriter.WriteRef(AObjectId: TPDFObjectId);
 begin
   EmitSeparatorIfNeeded;
-  WriteAscii(Format('%d 0 R', [AObjectId]));
+  WriteAscii(IntToStr(AObjectId) + ' 0 R');
   fNeedsSeparator := True;
 end;
 
@@ -240,43 +280,50 @@ end;
 procedure TPDFWriter.WriteLiteralString(const AValue: string);
 var
   i: Integer;
-  esc: string;
+  esc: TStringBuilder;
 begin
   EmitSeparatorIfNeeded;
-  esc := '';
-  for i := 1 to Length(AValue) do
-    case AValue[i] of
-      '(':  esc := esc + '\(';
-      ')':  esc := esc + '\)';
-      '\':  esc := esc + '\\';
-      #10:  esc := esc + '\n';
-      #13:  esc := esc + '\r';
-      #9:   esc := esc + '\t';
-      #8:   esc := esc + '\b';
-      #12:  esc := esc + '\f';
-    else
-      esc := esc + AValue[i];
-    end;
-  WriteAscii('(' + esc + ')');
+  esc := TStringBuilder.Create(Length(AValue) + 2);
+  try
+    esc.Append('(');
+    for i := 1 to Length(AValue) do
+      case AValue[i] of
+        '(':  esc.Append('\(');
+        ')':  esc.Append('\)');
+        '\':  esc.Append('\\');
+        #10:  esc.Append('\n');
+        #13:  esc.Append('\r');
+        #9:   esc.Append('\t');
+        #8:   esc.Append('\b');
+        #12:  esc.Append('\f');
+      else
+        esc.Append(AValue[i]);
+      end;
+    esc.Append(')');
+    WriteAscii(esc.ToString);
+  finally
+    esc.Free;
+  end;
   fNeedsSeparator := True;
 end;
 
 procedure TPDFWriter.WriteHexString(const ABytes: TBytes);
+const
+  HEX: array[0..15] of Char = '0123456789ABCDEF';
 var
-  sb: TStringBuilder;
-  b: Byte;
+  s: string;
+  i: Integer;
 begin
   EmitSeparatorIfNeeded;
-  sb := TStringBuilder.Create;
-  try
-    sb.Append('<');
-    for b in ABytes do
-      sb.Append(IntToHex(b, 2));
-    sb.Append('>');
-    WriteAscii(sb.ToString);
-  finally
-    sb.Free;
+  SetLength(s, Length(ABytes) * 2 + 2);
+  s[1] := '<';
+  for i := 0 to High(ABytes) do
+  begin
+    s[2 + i * 2]     := HEX[ABytes[i] shr 4];
+    s[2 + i * 2 + 1] := HEX[ABytes[i] and $F];
   end;
+  s[Length(s)] := '>';
+  WriteAscii(s);
   fNeedsSeparator := True;
 end;
 
@@ -312,7 +359,7 @@ end;
 
 function TPDFWriter.CurrentOffset: Int64;
 begin
-  Result := fStream.Position;
+  Result := fPosition;
 end;
 
 function TPDFWriter.ObjectCount: Integer;
@@ -320,7 +367,7 @@ begin
   Result := fNextId - 1;
 end;
 
-function TPDFWriter.Finalize(ARootObjectId: TPDFObjectId): TBytes;
+procedure TPDFWriter.Finish(ARootObjectId: TPDFObjectId; AInfoObjectId: TPDFObjectId);
 var
   xrefOffset: Int64;
   i: Integer;
@@ -331,21 +378,19 @@ begin
   // Defensive: every reserved object must have been written. Otherwise the
   // xref entry would point at offset 0 (the file header) and crash the reader.
   for i := 0 to count - 1 do
-    if fOffsets[i] = 0 then
+    if not fWritten[i] then
       raise EAssertionFailed.CreateFmt(
         'PDF writer: object %d was reserved but never written', [i + 1]);
 
-  xrefOffset := fStream.Position;
+  xrefOffset := fPosition;
 
-  // xref section
   WriteAscii('xref' + #10);
-  WriteAscii(Format('0 %d'#10, [count + 1]));
+  WriteAscii('0 ' + IntToStr(count + 1) + #10);
   // Free entry for object 0 — head of free list, generation 65535
   WriteAscii('0000000000 65535 f '#10);
   for i := 0 to count - 1 do
     WriteAscii(Format('%.10d 00000 n '#10, [fOffsets[i]]));
 
-  // trailer
   WriteAscii('trailer' + #10);
   BeginDict;
   WriteName('Size'); WriteInt(count + 1);
@@ -353,14 +398,24 @@ begin
   begin
     WriteName('Root'); WriteRef(ARootObjectId);
   end;
+  if AInfoObjectId > 0 then
+  begin
+    WriteName('Info'); WriteRef(AInfoObjectId);
+  end;
   EndDict;
   WriteAscii(#10);
 
   WriteAscii('startxref' + #10);
   WriteAscii(IntToStr(xrefOffset) + #10);
   WriteAscii('%%EOF' + #10);
+end;
 
-  Result := Copy(fStream.Bytes, 0, fStream.Size);
+function TPDFWriter.Finalize(ARootObjectId: TPDFObjectId): TBytes;
+begin
+  if not fOwnsStream then
+    raise EAssertionFailed.Create('PDF writer: Finalize needs the internal stream; use Finish');
+  Finish(ARootObjectId);
+  Result := Copy(TBytesStream(fStream).Bytes, 0, fStream.Size);
 end;
 
 end.

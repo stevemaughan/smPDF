@@ -3,7 +3,7 @@ unit smPDF.Page;
 interface
 
 uses
-  SysUtils, Classes, Generics.Collections, smPDF.Writer, smPDF.Types;
+  SysUtils, Classes, Generics.Collections, smPDF.Writer, smPDF.Types, smPDF.Buffer;
 
 type
   TPDFPage = class
@@ -11,15 +11,13 @@ type
     fWidthPixels:   Integer;
     fHeightPixels:  Integer;
     fDpi:           Integer;
-    fContentStream: TBytesStream;
+    fContent:       TPDFByteBuffer;
     fFontMap:       TDictionary<string, string>;  // PDF font name -> page-local resource name (F1, F2, ...)
     fFontOrder:     TList<string>;                // insertion order for stable iteration
     fImageMap:      TDictionary<string, string>;  // image key -> page-local name (Im1, Im2, ...)
     fImageOrder:    TList<string>;                // insertion order for stable iteration
 
-    procedure WriteRaw(const ABytes: TBytes); overload;
-    procedure WriteRaw(const AStr: string); overload;
-    procedure WriteRawAnsi(const AAnsi: AnsiString);
+    procedure WriteRaw(const AStr: string);
     procedure WriteOp(const AOperator: string; const AOperands: array of Double);
     function  ToPdfPoint(XPx, YPx: Integer): TPDFPointF;
   public
@@ -112,7 +110,7 @@ begin
   fWidthPixels   := AWidthPixels;
   fHeightPixels  := AHeightPixels;
   fDpi           := ADpi;
-  fContentStream := TBytesStream.Create;
+  fContent       := TPDFByteBuffer.Create;
   fFontMap       := TDictionary<string, string>.Create;
   fFontOrder     := TList<string>.Create;
   fImageMap      := TDictionary<string, string>.Create;
@@ -125,18 +123,8 @@ begin
   fImageMap.Free;
   fFontOrder.Free;
   fFontMap.Free;
-  fContentStream.Free;
+  fContent.Free;
   inherited;
-end;
-
-procedure TPDFPage.WriteRawAnsi(const AAnsi: AnsiString);
-var
-  bytes: TBytes;
-begin
-  if AAnsi = '' then Exit;
-  SetLength(bytes, Length(AAnsi));
-  Move(AAnsi[1], bytes[0], Length(AAnsi));
-  WriteRaw(bytes);
 end;
 
 function TPDFPage.UseFont(const APdfFontName: string): string;
@@ -200,41 +188,25 @@ end;
 
 function TPDFPage.ContentStreamSize: Integer;
 begin
-  Result := fContentStream.Size;
-end;
-
-procedure TPDFPage.WriteRaw(const ABytes: TBytes);
-begin
-  if Length(ABytes) > 0 then
-    fContentStream.WriteBuffer(ABytes[0], Length(ABytes));
+  Result := fContent.Size;
 end;
 
 procedure TPDFPage.WriteRaw(const AStr: string);
-var
-  bytes: TBytes;
-  i: Integer;
 begin
-  if AStr = '' then Exit;
-  SetLength(bytes, Length(AStr));
-  for i := 1 to Length(AStr) do
-    bytes[i - 1] := Byte(Ord(AStr[i]) and $FF);
-  WriteRaw(bytes);
+  fContent.AppendAscii(AStr);
 end;
 
 procedure TPDFPage.WriteOp(const AOperator: string; const AOperands: array of Double);
 var
   i: Integer;
-  s: string;
 begin
-  s := '';
   for i := 0 to High(AOperands) do
   begin
-    if i > 0 then s := s + ' ';
-    s := s + FormatPdfNumber(AOperands[i]);
+    fContent.AppendNumber(AOperands[i]);
+    fContent.AppendByte(Ord(' '));
   end;
-  if Length(AOperands) > 0 then s := s + ' ';
-  s := s + AOperator + #10;
-  WriteRaw(s);
+  fContent.AppendAscii(AOperator);
+  fContent.AppendByte(10);
 end;
 
 function TPDFPage.ToPdfPoint(XPx, YPx: Integer): TPDFPointF;
@@ -272,26 +244,28 @@ end;
 procedure TPDFPage.SetDashPattern(const APattern: array of Double; APhase: Double);
 var
   i: Integer;
-  s: string;
 begin
-  s := '[';
+  fContent.AppendByte(Ord('['));
   for i := 0 to High(APattern) do
   begin
-    if i > 0 then s := s + ' ';
-    s := s + FormatPdfNumber(APattern[i]);
+    if i > 0 then fContent.AppendByte(Ord(' '));
+    fContent.AppendNumber(APattern[i]);
   end;
-  s := s + '] ' + FormatPdfNumber(APhase) + ' d'#10;
-  WriteRaw(s);
+  fContent.AppendAscii('] ');
+  fContent.AppendNumber(APhase);
+  fContent.AppendAscii(' d'#10);
 end;
 
 procedure TPDFPage.SetLineCap(ACap: Integer);
 begin
-  WriteRaw(IntToStr(ACap) + ' J'#10);
+  fContent.AppendInt(ACap);
+  fContent.AppendAscii(' J'#10);
 end;
 
 procedure TPDFPage.SetLineJoin(AJoin: Integer);
 begin
-  WriteRaw(IntToStr(AJoin) + ' j'#10);
+  fContent.AppendInt(AJoin);
+  fContent.AppendAscii(' j'#10);
 end;
 
 procedure TPDFPage.ConcatMatrix(A, B, C, D, E, F: Double);
@@ -306,7 +280,7 @@ var
   p: TPDFPointF;
 begin
   p := ToPdfPoint(XPx, YPx);
-  WriteOp('m', [p.X, p.Y]);
+  fContent.AppendPointOp(p.X, p.Y, 'm');
 end;
 
 procedure TPDFPage.UserLineTo(XPx, YPx: Integer);
@@ -314,7 +288,7 @@ var
   p: TPDFPointF;
 begin
   p := ToPdfPoint(XPx, YPx);
-  WriteOp('l', [p.X, p.Y]);
+  fContent.AppendPointOp(p.X, p.Y, 'l');
 end;
 
 procedure TPDFPage.UserRectanglePath(X1Px, Y1Px, X2Px, Y2Px: Integer);
@@ -409,7 +383,11 @@ end;
 
 procedure TPDFPage.SetTextFont(const AResourceName: string; ASizePoints: Double);
 begin
-  WriteRaw('/' + AResourceName + ' ' + FormatPdfNumber(ASizePoints) + ' Tf'#10);
+  fContent.AppendByte(Ord('/'));
+  fContent.AppendAscii(AResourceName);
+  fContent.AppendByte(Ord(' '));
+  fContent.AppendNumber(ASizePoints);
+  fContent.AppendAscii(' Tf'#10);
 end;
 
 procedure TPDFPage.SetTextMatrixUserBaseline(XPx, YPxBaseline: Integer);
@@ -422,34 +400,33 @@ end;
 
 procedure TPDFPage.SetTextRenderingMode(AMode: Integer);
 begin
-  WriteRaw(IntToStr(AMode) + ' Tr'#10);
+  fContent.AppendInt(AMode);
+  fContent.AppendAscii(' Tr'#10);
 end;
 
 procedure TPDFPage.ShowTextAnsi(const AAnsiBytes: AnsiString);
 var
-  esc: AnsiString;
   i: Integer;
   c: AnsiChar;
 begin
-  esc := '(';
+  fContent.AppendByte(Ord('('));
   for i := 1 to Length(AAnsiBytes) do
   begin
     c := AAnsiBytes[i];
     case c of
-      '(': esc := esc + AnsiString('\(');
-      ')': esc := esc + AnsiString('\)');
-      '\': esc := esc + AnsiString('\\');
-      #10: esc := esc + AnsiString('\n');
-      #13: esc := esc + AnsiString('\r');
-      #9:  esc := esc + AnsiString('\t');
-      #8:  esc := esc + AnsiString('\b');
-      #12: esc := esc + AnsiString('\f');
+      '(': fContent.AppendAscii('\(');
+      ')': fContent.AppendAscii('\)');
+      '\': fContent.AppendAscii('\\');
+      #10: fContent.AppendAscii('\n');
+      #13: fContent.AppendAscii('\r');
+      #9:  fContent.AppendAscii('\t');
+      #8:  fContent.AppendAscii('\b');
+      #12: fContent.AppendAscii('\f');
     else
-      esc := esc + c;
+      fContent.AppendByte(Ord(c));
     end;
   end;
-  esc := esc + AnsiString(') Tj'#10);
-  WriteRawAnsi(esc);
+  fContent.AppendAscii(') Tj'#10);
 end;
 
 // ---------- Object emission ----------
@@ -459,7 +436,7 @@ function TPDFPage.Emit(AWriter: TPDFWriter; AParentId: TPDFObjectId;
   AImageIds: TDictionary<string, TPDFObjectId> = nil;
   ACompress: Boolean = False): TPDFObjectId;
 var
-  contentBytes: TBytes;
+  packed_: TBytes;
   contentId, pageId: TPDFObjectId;
   fontName, imageKey: string;
   fontObjId, imageObjId: TPDFObjectId;
@@ -467,20 +444,16 @@ var
 begin
   if ACompress then
   begin
-    contentBytes := FlateCompress(fContentStream.Memory, fContentStream.Size);
-    contentId := AWriter.EmitStreamObject(contentBytes,
+    packed_ := FlateCompress(fContent.Memory, fContent.Size);
+    contentId := AWriter.EmitStreamObject(packed_,
       procedure(w: TPDFWriter)
       begin
         w.WriteName('Filter'); w.WriteName('FlateDecode');
       end);
+    packed_ := nil;
   end
   else
-  begin
-    SetLength(contentBytes, fContentStream.Size);
-    if fContentStream.Size > 0 then
-      Move(fContentStream.Memory^, contentBytes[0], fContentStream.Size);
-    contentId := AWriter.EmitStreamObject(contentBytes);
-  end;
+    contentId := AWriter.EmitStreamObject(fContent.Memory, fContent.Size, nil);
 
   hasFonts  := (AFontIds  <> nil) and (fFontOrder.Count  > 0);
   hasImages := (AImageIds <> nil) and (fImageOrder.Count > 0);

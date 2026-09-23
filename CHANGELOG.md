@@ -17,6 +17,14 @@ break source compatibility; they are marked **Breaking**.
   streams and `/FontFile2` font programs are now Flate-compressed (`/Length1`
   keeps the uncompressed font length). The Map demo shrinks from 4.0 MB to
   0.69 MB. Set `CompressStreams := False` to inspect content bytes.
+- **Faster, leaner output.** Content streams are built in one growable byte
+  buffer with numbers written digit by digit (byte-identical to the previous
+  `FormatPdfNumber`), instead of a string and a `TBytes` per operator.
+  `Save(FileName)` streams through a 1 MB `TBufferedFileStream` and
+  `Save(Stream)` writes straight to the stream; neither builds the whole
+  document in memory first. `ToBytes` hands back its buffer without a final
+  copy. Flate runs at zlib level 4 (about 4× faster than level 6 on map
+  content, ~10% larger).
 
 ### Added
 

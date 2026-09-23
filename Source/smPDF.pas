@@ -131,6 +131,7 @@ type
     function FontAscentPt(const AResolved: TPDFResolvedFont; ASizePt: Double): Double;
     function FontLineHeightPt(const AResolved: TPDFResolvedFont; ASizePt: Double): Double;
 
+    procedure WriteDocument(AWriter: TPDFWriter);
     function EmitTrueTypeFont(AWriter: TPDFWriter; ATTF: TTTFFont): TPDFObjectId;
     function EmitImageObject(AWriter: TPDFWriter; const AData: TPDFImageData): TPDFObjectId;
     function GetOrAddImage(APicture: TPicture): string;
@@ -538,7 +539,7 @@ begin
     raise EPDFError.Create('No active page. Call NewPage before drawing.');
 end;
 
-function TsmPDF.ToBytes: TBytes;
+procedure TsmPDF.WriteDocument(AWriter: TPDFWriter);
 var
   writer: TPDFWriter;
   catalogId, pagesRootId, fontId, imgId: TPDFObjectId;
@@ -552,11 +553,11 @@ begin
   if fPages.Count = 0 then
     raise EPDFError.Create('Cannot save: no pages added. Call NewPage first.');
 
+  writer              := AWriter;
   fontIds             := TDictionary<string, TPDFObjectId>.Create;
   imageIds            := TDictionary<string, TPDFObjectId>.Create;
   fontNamesAcrossDoc  := TList<string>.Create;
   imageKeysAcrossDoc  := TList<string>.Create;
-  writer              := TPDFWriter.Create;
   try
     catalogId := writer.BeginObject;
       writer.BeginDict;
@@ -629,9 +630,8 @@ begin
       writer.EndDict;
     writer.EndObject;
 
-    Result := writer.Finalize(catalogId);
+    writer.Finish(catalogId);
   finally
-    writer.Free;
     imageKeysAcrossDoc.Free;
     fontNamesAcrossDoc.Free;
     imageIds.Free;
@@ -639,33 +639,61 @@ begin
   end;
 end;
 
+function TsmPDF.ToBytes: TBytes;
+var
+  stream: TBytesStream;
+  size: Int64;
+begin
+  stream := TBytesStream.Create;
+  try
+    Save(stream);
+    // Take over the stream's buffer and trim it once the stream no longer
+    // shares it, so the whole document is never copied.
+    Result := stream.Bytes;
+    size   := stream.Size;
+  finally
+    stream.Free;
+  end;
+  SetLength(Result, size);
+end;
+
 function TsmPDF.Save(AStream: TStream): Int64;
 var
-  bytes: TBytes;
+  writer: TPDFWriter;
 begin
   if AStream = nil then
     raise EPDFError.Create('Cannot save: stream is nil.');
-  bytes := ToBytes;
-  if Length(bytes) > 0 then
-    AStream.WriteBuffer(bytes[0], Length(bytes));
-  Result := Length(bytes);
+  if fPages.Count = 0 then
+    raise EPDFError.Create('Cannot save: no pages added. Call NewPage first.');
+  writer := TPDFWriter.Create(AStream);
+  try
+    WriteDocument(writer);
+    Result := writer.CurrentOffset;
+  finally
+    writer.Free;
+  end;
 end;
 
 function TsmPDF.Save(const AFileName: string): Int64;
+const
+  FILE_BUFFER_SIZE = 1024 * 1024;
 var
-  fs: TFileStream;
-  bytes: TBytes;
+  fs: TBufferedFileStream;
 begin
-  // Build before creating the file so a failed build doesn't leave an empty file behind.
-  bytes := ToBytes;
-  fs := TFileStream.Create(AFileName, fmCreate);
+  // Check before creating the file so a failed build doesn't leave an empty file behind.
+  if fPages.Count = 0 then
+    raise EPDFError.Create('Cannot save: no pages added. Call NewPage first.');
+  fs := TBufferedFileStream.Create(AFileName, fmCreate, FILE_BUFFER_SIZE);
   try
-    if Length(bytes) > 0 then
-      fs.WriteBuffer(bytes[0], Length(bytes));
-  finally
-    fs.Free;
+    try
+      Result := Save(fs);
+    finally
+      fs.Free;
+    end;
+  except
+    SysUtils.DeleteFile(AFileName);
+    raise;
   end;
-  Result := Length(bytes);
 end;
 
 function TsmPDF.Save(const AFileName: string; const AEmbedFonts: Boolean): Int64;
