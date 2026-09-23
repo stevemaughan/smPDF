@@ -63,6 +63,12 @@ function StandardFontDescent(AFont: TStandardFont; ASizePoints: Double): Double;
 // Uses a 1.2x size-multiplier convention shared by most renderers.
 function StandardFontLineHeight(AFont: TStandardFont; ASizePoints: Double): Double;
 
+// GDI draws the standard families with Arial, Times New Roman and Courier New,
+// so these are those fonts' usWinAscent / usWinDescent, plus the AFM cap and
+// x heights, all in ems.
+procedure StandardFontCellMetrics(AFont: TStandardFont;
+  out AWinAscent, AWinDescent, ACapHeight, AXHeight: Double);
+
 // Convert an arbitrary Unicode string to WinAnsi (codepage 1252) bytes.
 // Code points not in WinAnsi become the literal '?' (0x3F).
 function StringToWinAnsi(const AText: string): AnsiString;
@@ -279,6 +285,19 @@ end;
 function StandardFontLineHeight(AFont: TStandardFont; ASizePoints: Double): Double;
 begin
   Result := 1.2 * ASizePoints;
+end;
+
+procedure StandardFontCellMetrics(AFont: TStandardFont;
+  out AWinAscent, AWinDescent, ACapHeight, AXHeight: Double);
+begin
+  case AFont of
+    sfTimesRoman, sfTimesBold, sfTimesItalic, sfTimesBoldItalic:
+      begin AWinAscent := 0.891; AWinDescent := 0.216; ACapHeight := 0.662; AXHeight := 0.450; end;
+    sfCourier, sfCourierBold, sfCourierOblique, sfCourierBoldOblique:
+      begin AWinAscent := 0.833; AWinDescent := 0.300; ACapHeight := 0.562; AXHeight := 0.426; end;
+  else
+    begin AWinAscent := 0.905; AWinDescent := 0.212; ACapHeight := 0.718; AXHeight := 0.523; end;
+  end;
 end;
 
 const

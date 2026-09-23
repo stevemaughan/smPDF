@@ -9,9 +9,18 @@ unit smPDF.GdiFonts;
 interface
 
 uses
-  SysUtils, Winapi.Windows;
+  SysUtils, Types, Winapi.Windows;
 
 type
+  TGlyphOutlineCommand = (gcMoveTo, gcLineTo, gcCurveTo, gcClose);
+
+  // A glyph outline in font units (y up, origin on the baseline at the pen
+  // position). gcCurveTo consumes three points: two controls and the end.
+  TGlyphOutline = record
+    Commands: TArray<TGlyphOutlineCommand>;
+    Points:   TArray<TPointF>;
+  end;
+
   // A font selected into a private memory DC. Free releases both.
   TGdiFontContext = class
   strict private
@@ -30,6 +39,9 @@ type
     function TableData(const ATag: AnsiString): TBytes;
     // Tags listed in the selected font's own table directory.
     function TableTags: TArray<AnsiString>;
+    // The unhinted outline of a glyph id, in units of the em height the
+    // context was created with. False for glyphs GDI cannot outline.
+    function GlyphOutline(AGlyph: Word; out AOutline: TGlyphOutline): Boolean;
 
     property DC: HDC read fDC;
     property FaceName: string read fFaceName;
@@ -145,6 +157,133 @@ begin
     tag[3] := AnsiChar(dir[i * 16 + 2]);
     tag[4] := AnsiChar(dir[i * 16 + 3]);
     Result[i] := tag;
+  end;
+end;
+
+function FixedToDouble(const AValue: TFixed): Double;
+begin
+  Result := AValue.value + AValue.fract / 65536.0;
+end;
+
+function TGdiFontContext.GlyphOutline(AGlyph: Word; out AOutline: TGlyphOutline): Boolean;
+const
+  GGO_UNHINTED_    = $0100;
+  TT_PRIM_CSPLINE_ = 3;  // cubic Bezier segments (CFF outlines); missing from Winapi.Windows
+var
+  gm: TGlyphMetrics;
+  mat: TMat2;
+  size: DWORD;
+  buf: TBytes;
+  p, polyEnd, recEnd: NativeInt;
+  header: PTTPolygonHeader;
+  curve: PTTPolyCurve;
+  cmds: TList<TGlyphOutlineCommand>;
+  pts: TList<TPointF>;
+  cur, q0, q1, mid: TPointF;
+  i, n: Integer;
+  apfx: PPointFX;
+
+  function PF(const AFx: TPointFX): TPointF;
+  begin
+    Result := TPointF.Create(FixedToDouble(AFx.x), FixedToDouble(AFx.y));
+  end;
+
+  function At(AIndex: Integer): TPointF;
+  begin
+    Result := PF(PPointFX(NativeInt(apfx) + AIndex * SizeOf(TPointFX))^);
+  end;
+
+  procedure Cubic(const C1, C2, E: TPointF);
+  begin
+    cmds.Add(gcCurveTo);
+    pts.Add(C1);
+    pts.Add(C2);
+    pts.Add(E);
+    cur := E;
+  end;
+
+  // A quadratic Bezier (P0, C, P2) is the cubic with controls two thirds of
+  // the way from each end towards C.
+  procedure Quad(const C, E: TPointF);
+  begin
+    Cubic(TPointF.Create(cur.X + 2 / 3 * (C.X - cur.X), cur.Y + 2 / 3 * (C.Y - cur.Y)),
+          TPointF.Create(E.X + 2 / 3 * (C.X - E.X), E.Y + 2 / 3 * (C.Y - E.Y)), E);
+  end;
+
+begin
+  AOutline.Commands := nil;
+  AOutline.Points := nil;
+  FillChar(mat, SizeOf(mat), 0);
+  mat.eM11.value := 1;
+  mat.eM22.value := 1;
+  size := GetGlyphOutlineW(fDC, AGlyph, GGO_NATIVE or GGO_UNHINTED_ or GGO_GLYPH_INDEX, gm, 0, nil, mat);
+  if size = GDI_ERROR then Exit(False);
+  if size = 0 then Exit(True);  // a blank glyph such as space
+  SetLength(buf, size);
+  if GetGlyphOutlineW(fDC, AGlyph, GGO_NATIVE or GGO_UNHINTED_ or GGO_GLYPH_INDEX, gm, size,
+    @buf[0], mat) = GDI_ERROR then Exit(False);
+
+  cmds := TList<TGlyphOutlineCommand>.Create;
+  pts := TList<TPointF>.Create;
+  try
+    p := 0;
+    while p + SizeOf(TTTPolygonHeader) <= Integer(size) do
+    begin
+      header := PTTPolygonHeader(@buf[p]);
+      polyEnd := p + NativeInt(header.cb);
+      cur := PF(header.pfxStart);
+      cmds.Add(gcMoveTo);
+      pts.Add(cur);
+      recEnd := p + SizeOf(TTTPolygonHeader);
+      while recEnd < polyEnd do
+      begin
+        curve := PTTPolyCurve(@buf[recEnd]);
+        n := curve.cpfx;
+        apfx := @curve.apfx[0];
+        case curve.wType of
+          TT_PRIM_LINE:
+            for i := 0 to n - 1 do
+            begin
+              cmds.Add(gcLineTo);
+              cur := At(i);
+              pts.Add(cur);
+            end;
+          TT_PRIM_QSPLINE:
+            // B-spline: between consecutive off-curve controls the on-curve
+            // point is implied at their midpoint; the last point is on-curve.
+            for i := 0 to n - 2 do
+            begin
+              q0 := At(i);
+              if i < n - 2 then
+              begin
+                q1 := At(i + 1);
+                mid := TPointF.Create((q0.X + q1.X) / 2, (q0.Y + q1.Y) / 2);
+                Quad(q0, mid);
+              end
+              else
+                Quad(q0, At(n - 1));
+            end;
+          TT_PRIM_CSPLINE_:
+            begin
+              i := 0;
+              while i + 2 < n do
+              begin
+                Cubic(At(i), At(i + 1), At(i + 2));
+                Inc(i, 3);
+              end;
+            end;
+        end;
+        recEnd := recEnd + 4 + n * SizeOf(TPointFX);
+      end;
+      cmds.Add(gcClose);
+      p := polyEnd;
+    end;
+    AOutline.Commands := cmds.ToArray;
+    AOutline.Points := pts.ToArray;
+    Result := True;
+  finally
+    pts.Free;
+    cmds.Free;
   end;
 end;
 

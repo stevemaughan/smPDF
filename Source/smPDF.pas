@@ -38,6 +38,29 @@ type
 
   TPDFFillRule = (frEvenOdd, frNonZero);
 
+  // Where the Y of DrawText(X, Y) sits relative to the text.
+  //   toTypoTop  - Y is the top of the typographic ascent (the 1.x behaviour)
+  //   toGdiTop   - Y is the top of GDI's character cell, as in TCanvas.TextOut:
+  //                the baseline is Y + usWinAscent, and TextHeight is
+  //                usWinAscent + usWinDescent
+  //   toBaseline - Y is the baseline
+  TPDFTextOrigin = (toTypoTop, toGdiTop, toBaseline);
+
+  // How outlined text (Font.StrokeWidth / StrokeStyle) is painted.
+  //   smOverFill  - stroke drawn over the fill (text render mode 2)
+  //   smUnderFill - stroke drawn first, fill on top: a map-label halo whose
+  //                 visible width outside the glyph is StrokeWidth
+  TPDFStrokeMode = (smOverFill, smUnderFill);
+
+  // Font metrics in page pixels for the current font and size.
+  TPDFTextMetrics = record
+    Ascent:     Double;   // baseline to top of the line box
+    Descent:    Double;   // baseline to bottom of the line box (positive)
+    LineHeight: Double;   // what TextHeight returns
+    CapHeight:  Double;
+    XHeight:    Double;
+  end;
+
   TPDFLineCap  = (lcButt, lcRound, lcSquare);
   TPDFLineJoin = (ljMiter, ljRound, ljBevel);
 
@@ -54,6 +77,8 @@ type
     fItalics:     Boolean;
     fBold:        Boolean;
     fStrokeStyle: TPDFStrokeStyle;
+    fStrokeWidth: Double;
+    fStrokeMode:  TPDFStrokeMode;
   public
     constructor Create;
 
@@ -66,6 +91,10 @@ type
     property Underline:  Boolean          read fUnderline   write fUnderline;
     property StrokeStyle: TPDFStrokeStyle read fStrokeStyle write fStrokeStyle;
     property StrokeColor: TColor          read fStrokeColor write fStrokeColor;
+    // Outline width in points. When greater than zero it overrides the
+    // StrokeStyle fraction and turns the outline on.
+    property StrokeWidth: Double          read fStrokeWidth write fStrokeWidth;
+    property StrokeMode:  TPDFStrokeMode  read fStrokeMode  write fStrokeMode;
   end;
 
   TPDFPen = class
@@ -116,6 +145,7 @@ type
     fImageKeyByPicture: TDictionary<TObject, string>;         // TPicture pointer -> key (for dedup)
     fPathOpen:          Boolean;
     fPathHasPoint:      Boolean;
+    fTextOrigin:        TPDFTextOrigin;
 
     procedure StartPage(AWidthPt, AHeightPt: Double; ADPI: Integer; APaperColor: TColor);
     procedure EnsureCurrentPage;
@@ -126,7 +156,15 @@ type
     function  PtToPx(APoints: Double): Double; inline;
     function  EffectiveFontSize: Double;
     procedure MeasureTextPx(const AText: string; out AWidthPx, AHeightPx: Double);
-    procedure EmitOneTextLine(const AText: string; X, Y: Double; ASizePt: Double);
+    procedure EmitTextLine(const AText: string; X, ABaselineY: Double; ASizePt: Double);
+    procedure CellMetricsPt(const AResolved: TPDFFontResolution; ASizePt: Double;
+      AGdiCell: Boolean; out AAscent, ADescent, ALineHeight: Double);
+    function  BaselineOffsetPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
+    function  TopToBaselinePt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
+    function  HaloActive: Boolean;
+    function  HaloWidthPt(ASizePt: Double): Double;
+    procedure BeginRotation(X, Y, AAngle: Double; out ARotated: Boolean);
+    function  OutlineFont: TPDFFontResolution;
     procedure DrawTextInRect(const AText: string; ALeft, ATop, ARight, ABottom: Double;
       AAlignment: TAlignment);
     procedure DrawParagraphInRect(const AText: string; ALeft, ATop, ARight, ABottom: Double;
@@ -141,8 +179,7 @@ type
     function TextWidthPt(const AText: string; ASizePt: Double): Double;
     function WrapLines(const AText: string; ASizePt, AMaxWidthPt: Double): TStringList;
     procedure EmitGlyphRuns(const ARuns: TPDFGlyphRuns; X, ABaselineY, ASizePt: Double;
-      AForceMode: Integer);
-    function FontAscentPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
+      AForceMode: Integer; var ACurrentMode: Integer);
     function FontLineHeightPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
     function GetWarnings: TStrings;
 
@@ -182,6 +219,11 @@ type
     // rectangle (they ignore Font.Size); they are not VCL TextRect.
     procedure DrawText(const AText: string; ARect: TRect); overload;
     procedure DrawText(const AText: string; ARect: TRect; AAlignment: TAlignment); overload;
+    // Draws the text as filled vector paths taken from the font's glyph
+    // outlines, not as PDF text: for icon glyphs (e.g. Ionicons) and for fonts
+    // that cannot be embedded. Honours Font.Color, StrokeMode / StrokeWidth,
+    // rotation and TextOrigin. No kerning and no font fallback.
+    procedure DrawTextOutlines(const AText: string; X, Y: Double; AAngle: Double = 0);
     procedure DrawParagraph(const AText: string; ARect: TRect; AAlignment: TAlignment;
       APadding: TPDFTextPadding);
 
@@ -198,6 +240,10 @@ type
     // Word-wrap AText into AMaxWidthPx using the same path as DrawParagraph and
     // return the resulting block size (widest line × N lines × line-height).
     function MeasureParagraph(const AText: string; AMaxWidthPx: Integer; APadding: TPDFTextPadding = tpSingle): TSize;
+
+    // Ascent, descent and line height of the current font and size, in page
+    // pixels, as TextOrigin places text (GDI's cell under toGdiTop).
+    function FontMetrics: TPDFTextMetrics;
 
     procedure DrawLine(const x1, y1, x2, y2: Integer); overload;
     procedure DrawLine(const x1, y1, x2, y2: Double); overload;
@@ -279,12 +325,13 @@ type
     // were missing, not TrueType, or not embeddable, and characters a font
     // could not show. Read-only; cleared only by creating a new TsmPDF.
     property Warnings:        TStrings        read GetWarnings;
+    property TextOrigin:      TPDFTextOrigin  read fTextOrigin write fTextOrigin;
   end;
 
 implementation
 
 uses
-  System.Math, smPDF.Geometry, smPDF.Types, smPDF.FontEmit;
+  System.Math, smPDF.Geometry, smPDF.Types, smPDF.FontEmit, smPDF.GdiFonts;
 
 { TPDFFont }
 
@@ -296,6 +343,8 @@ begin
   fColor       := clBlack;
   fStrokeColor := clBlack;
   fStrokeStyle := ssNone;
+  fStrokeWidth := 0;
+  fStrokeMode  := smOverFill;
 end;
 
 { TPDFPen }
@@ -337,6 +386,7 @@ begin
   fSize            := psA4;
   fOrientation     := poPortrait;
   fDPI             := 300;
+  fTextOrigin      := toTypoTop;
   fWidthPt         := 595.28;
   fHeightPt        := 841.89;
 end;
@@ -390,19 +440,97 @@ begin
   Result := fFonts.Resolve(fFont.Name, fFont.Bold, fFont.Italics);
 end;
 
-function TsmPDF.FontAscentPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
+procedure TsmPDF.CellMetricsPt(const AResolved: TPDFFontResolution; ASizePt: Double;
+  AGdiCell: Boolean; out AAscent, ADescent, ALineHeight: Double);
+var
+  m: TTTFFontMetrics;
+  winAsc, winDesc, cap, xh: Double;
 begin
   if AResolved.Face.IsStandard then
-    Result := StandardFontAscent(AResolved.Face.StdFont, ASizePt)
+  begin
+    if AGdiCell then
+    begin
+      StandardFontCellMetrics(AResolved.Face.StdFont, winAsc, winDesc, cap, xh);
+      AAscent  := winAsc * ASizePt;
+      ADescent := winDesc * ASizePt;
+    end
+    else
+    begin
+      AAscent  := StandardFontAscent(AResolved.Face.StdFont, ASizePt);
+      ADescent := StandardFontDescent(AResolved.Face.StdFont, ASizePt);
+    end;
+  end
   else
-    Result := AResolved.Face.TTF.Metrics.Ascent
-            * ASizePt / AResolved.Face.TTF.Metrics.UnitsPerEm;
+  begin
+    m := AResolved.Face.TTF.Metrics;
+    if AGdiCell then
+    begin
+      AAscent  := m.WinAscent  * ASizePt / m.UnitsPerEm;
+      ADescent := m.WinDescent * ASizePt / m.UnitsPerEm;
+    end
+    else
+    begin
+      AAscent  := m.Ascent  * ASizePt / m.UnitsPerEm;
+      ADescent := -m.Descent * ASizePt / m.UnitsPerEm;
+    end;
+  end;
+  if AGdiCell then
+    ALineHeight := AAscent + ADescent
+  else
+    ALineHeight := 1.2 * ASizePt;
 end;
 
 function TsmPDF.FontLineHeightPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
+var
+  asc, desc: Double;
 begin
-  // Same 1.2x convention for both Standard 14 and TTF.
-  Result := 1.2 * ASizePt;
+  CellMetricsPt(AResolved, ASizePt, fTextOrigin = toGdiTop, asc, desc, Result);
+end;
+
+// From the top of the line box to the baseline.
+function TsmPDF.TopToBaselinePt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
+var
+  desc, lineHeight: Double;
+begin
+  CellMetricsPt(AResolved, ASizePt, fTextOrigin = toGdiTop, Result, desc, lineHeight);
+end;
+
+// From the Y passed to DrawText(X, Y) to the baseline.
+function TsmPDF.BaselineOffsetPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
+begin
+  if fTextOrigin = toBaseline then
+    Result := 0
+  else
+    Result := TopToBaselinePt(AResolved, ASizePt);
+end;
+
+function TsmPDF.FontMetrics: TPDFTextMetrics;
+var
+  res: TPDFFontResolution;
+  sizePt, asc, desc, lh, winAsc, winDesc, cap, xh: Double;
+  m: TTTFFontMetrics;
+begin
+  EnsureCurrentPage;
+  res := ResolveCurrentFont;
+  sizePt := EffectiveFontSize;
+  CellMetricsPt(res, sizePt, fTextOrigin = toGdiTop, asc, desc, lh);
+  if res.Face.IsStandard then
+  begin
+    StandardFontCellMetrics(res.Face.StdFont, winAsc, winDesc, cap, xh);
+    cap := cap * sizePt;
+    xh  := xh * sizePt;
+  end
+  else
+  begin
+    m := res.Face.TTF.Metrics;
+    cap := m.CapHeight * sizePt / m.UnitsPerEm;
+    xh  := m.XHeight * sizePt / m.UnitsPerEm;
+  end;
+  Result.Ascent     := PtToPx(asc);
+  Result.Descent    := PtToPx(desc);
+  Result.LineHeight := PtToPx(lh);
+  Result.CapHeight  := PtToPx(cap);
+  Result.XHeight    := PtToPx(xh);
 end;
 
 // Exact paper sizes in points (portrait).
@@ -1240,14 +1368,13 @@ const
 // sets the rendering mode for every run; otherwise synthetic-bold runs use
 // fill + stroke (2) and the others fill (0).
 procedure TsmPDF.EmitGlyphRuns(const ARuns: TPDFGlyphRuns; X, ABaselineY, ASizePt: Double;
-  AForceMode: Integer);
+  AForceMode: Integer; var ACurrentMode: Integer);
 var
-  i, mode, lastMode: Integer;
+  i, mode: Integer;
   penX: Double;
   run: TPDFGlyphRun;
 begin
   penX := X;
-  lastMode := 0;
   for i := 0 to High(ARuns) do
   begin
     run := ARuns[i];
@@ -1258,10 +1385,10 @@ begin
       mode := 2
     else
       mode := 0;
-    if mode <> lastMode then
+    if mode <> ACurrentMode then
     begin
       fCurrentPage.SetTextRenderingMode(mode);
-      lastMode := mode;
+      ACurrentMode := mode;
     end;
     if run.Resolution.SyntheticItalic then
       fCurrentPage.SetTextMatrixUser(1, 0, SYNTHETIC_ITALIC_TAN, 1, penX, ABaselineY)
@@ -1275,16 +1402,29 @@ begin
   end;
 end;
 
-procedure TsmPDF.EmitOneTextLine(const AText: string; X, Y: Double; ASizePt: Double);
+function TsmPDF.HaloActive: Boolean;
+begin
+  Result := (fFont.StrokeWidth > 0) or (fFont.StrokeStyle <> ssNone);
+end;
+
+function TsmPDF.HaloWidthPt(ASizePt: Double): Double;
+begin
+  if fFont.StrokeWidth > 0 then
+    Result := fFont.StrokeWidth
+  else
+    Result := TextStrokeWidthPt(fFont.StrokeStyle, ASizePt);
+end;
+
+procedure TsmPDF.EmitTextLine(const AText: string; X, ABaselineY: Double; ASizePt: Double);
 var
   runs: TPDFGlyphRuns;
-  sizePt, baselineYPx: Double;
+  sizePt: Double;
   r, g, b, sr, sg, sb: Double;
   textWidthPx: Double;
   underlineYPx: Double;
   underlineThicknessPt: Double;
-  strokeText, emboldened: Boolean;
-  i: Integer;
+  halo, underFill, emboldened: Boolean;
+  i, mode: Integer;
 begin
   sizePt := ASizePt;
   if sizePt <= 0 then sizePt := 12;
@@ -1292,33 +1432,52 @@ begin
   runs := ShapeText(AText, True);
   if Length(runs) = 0 then Exit;
 
-  baselineYPx := Y + PtToPx(FontAscentPt(runs[0].Resolution, sizePt));
-
-  strokeText := fFont.StrokeStyle <> ssNone;
+  halo      := HaloActive;
+  underFill := halo and (fFont.StrokeMode = smUnderFill);
   emboldened := False;
-  if not strokeText then
-    for i := 0 to High(runs) do
-      emboldened := emboldened or runs[i].Resolution.SyntheticBold;
+  for i := 0 to High(runs) do
+    emboldened := emboldened or runs[i].Resolution.SyntheticBold;
 
   fCurrentPage.SaveState;
   ColorToRGBFloats(fFont.Color, r, g, b);
   fCurrentPage.SetFillRGB(r, g, b);
-  if strokeText then
+  if halo then
   begin
     ColorToRGBFloats(fFont.StrokeColor, sr, sg, sb);
     fCurrentPage.SetStrokeRGB(sr, sg, sb);
-    fCurrentPage.SetLineWidthPt(TextStrokeWidthPt(fFont.StrokeStyle, sizePt));
+    if underFill then
+    begin
+      // Half of a centred stroke hides under the fill, so double it to leave
+      // StrokeWidth showing outside the glyph.
+      fCurrentPage.SetLineWidthPt(2 * HaloWidthPt(sizePt));
+      fCurrentPage.SetLineJoin(1);
+      fCurrentPage.SetLineCap(1);
+    end
+    else
+      fCurrentPage.SetLineWidthPt(HaloWidthPt(sizePt));
   end
   else if emboldened then
   begin
     fCurrentPage.SetStrokeRGB(r, g, b);
     fCurrentPage.SetLineWidthPt(SYNTHETIC_BOLD_EM * sizePt);
   end;
+
+  mode := 0;
   fCurrentPage.BeginText;
-  if strokeText then
-    EmitGlyphRuns(runs, X, baselineYPx, sizePt, 2)
+  if underFill then
+  begin
+    EmitGlyphRuns(runs, X, ABaselineY, sizePt, 1, mode);
+    if emboldened then
+    begin
+      fCurrentPage.SetStrokeRGB(r, g, b);
+      fCurrentPage.SetLineWidthPt(SYNTHETIC_BOLD_EM * sizePt);
+    end;
+    EmitGlyphRuns(runs, X, ABaselineY, sizePt, -1, mode);
+  end
+  else if halo then
+    EmitGlyphRuns(runs, X, ABaselineY, sizePt, 2, mode)
   else
-    EmitGlyphRuns(runs, X, baselineYPx, sizePt, -1);
+    EmitGlyphRuns(runs, X, ABaselineY, sizePt, -1, mode);
   fCurrentPage.EndText;
   fCurrentPage.RestoreState;
 
@@ -1330,7 +1489,7 @@ begin
     if underlineThicknessPt < 0.5 then underlineThicknessPt := 0.5;
 
     // Underline sits ~0.12em below the baseline (PDF underlinePosition convention).
-    underlineYPx := baselineYPx + PtToPx(0.12 * sizePt);
+    underlineYPx := ABaselineY + PtToPx(0.12 * sizePt);
 
     fCurrentPage.SaveState;
     fCurrentPage.SetStrokeRGB(r, g, b);
@@ -1344,6 +1503,29 @@ begin
   end;
 end;
 
+// Starts a q ... cm block rotating AAngle degrees CCW around pixel (X, Y);
+// the caller closes it with RestoreState when ARotated.
+procedure TsmPDF.BeginRotation(X, Y, AAngle: Double; out ARotated: Boolean);
+var
+  thetaRad, cosT, sinT, pivotX, pivotY, cm_e, cm_f: Double;
+begin
+  ARotated := Abs(AAngle) > 1e-9;
+  if not ARotated then Exit;
+  thetaRad := AAngle * Pi / 180.0;
+  cosT := Cos(thetaRad);
+  sinT := Sin(thetaRad);
+  pivotX := PxToPt(X);
+  pivotY := fHeightPt - PxToPt(Y);
+  // Affine that rotates by AAngle degrees CCW around the pivot in PDF coords.
+  // PDF row-vector form [a b c d e f] = [cos, sin, -sin, cos, ex, ey] where:
+  //   ex = px*(1 - cos) + py*sin
+  //   ey = py*(1 - cos) - px*sin
+  cm_e := pivotX * (1 - cosT) + pivotY * sinT;
+  cm_f := pivotY * (1 - cosT) - pivotX * sinT;
+  fCurrentPage.SaveState;
+  fCurrentPage.ConcatMatrix(cosT, sinT, -sinT, cosT, cm_e, cm_f);
+end;
+
 procedure TsmPDF.DrawText(const AText: string; X, Y: Integer; AAngle: Double);
 begin
   DrawText(AText, Double(X), Double(Y), AAngle);
@@ -1351,42 +1533,170 @@ end;
 
 procedure TsmPDF.DrawText(const AText: string; X, Y: Double; AAngle: Double);
 var
-  extW, extH: Double;
+  extW, extH, sizePt, baselineY: Double;
   rotated: Boolean;
-  thetaRad, cosT, sinT: Double;
-  pivotX, pivotY: Double;
-  cm_e, cm_f: Double;
+  res: TPDFFontResolution;
 begin
   EnsureCanDraw;
   if AText = '' then Exit;
 
-  // Wrap the rest in q ... cm ... Q so the Brush background, the text, the
-  // Underline stroke, and the StrokeStyle glyph outline all rotate together.
-  // No cm is emitted when AAngle is zero, so default callers stay byte-clean.
-  rotated := Abs(AAngle) > 1e-9;
-  if rotated then
-  begin
-    thetaRad := AAngle * Pi / 180.0;
-    cosT := Cos(thetaRad);
-    sinT := Sin(thetaRad);
-    pivotX := PxToPt(X);
-    pivotY := fHeightPt - PxToPt(Y);
-    // Affine that rotates by AAngle degrees CCW around the pivot in PDF coords.
-    // PDF row-vector form [a b c d e f] = [cos, sin, -sin, cos, ex, ey] where:
-    //   ex = px*(1 - cos) + py*sin
-    //   ey = py*(1 - cos) - px*sin
-    cm_e := pivotX * (1 - cosT) + pivotY * sinT;
-    cm_f := pivotY * (1 - cosT) - pivotX * sinT;
-    fCurrentPage.SaveState;
-    fCurrentPage.ConcatMatrix(cosT, sinT, -sinT, cosT, cm_e, cm_f);
-  end;
+  // Rotation wraps everything in q ... cm ... Q so the Brush background, the
+  // text, the underline and the outline all rotate together. No cm is
+  // emitted when AAngle is zero, so default callers stay byte-clean.
+  BeginRotation(X, Y, AAngle, rotated);
 
+  sizePt := EffectiveFontSize;
+  res := ResolveCurrentFont;
+  baselineY := Y + PtToPx(BaselineOffsetPt(res, sizePt));
   if fBrush.Style = brushSolid then
   begin
     MeasureTextPx(AText, extW, extH);
-    FillRectWithBrush(fCurrentPage, fBrush, X, Y, X + extW, Y + extH);
+    FillRectWithBrush(fCurrentPage, fBrush, X, baselineY - PtToPx(TopToBaselinePt(res, sizePt)),
+      X + extW, baselineY - PtToPx(TopToBaselinePt(res, sizePt)) + extH);
   end;
-  EmitOneTextLine(AText, X, Y, EffectiveFontSize);
+  EmitTextLine(AText, X, baselineY, sizePt);
+
+  if rotated then
+    fCurrentPage.RestoreState;
+end;
+
+function TsmPDF.OutlineFont: TPDFFontResolution;
+var
+  family: string;
+  std: TStandardFont;
+begin
+  family := fFont.Name;
+  // The standard families have no GDI font of their own; GDI draws them with these.
+  if TryResolveStandardFont(family, False, False, std) then
+    case std of
+      sfTimesRoman: family := 'Times New Roman';
+      sfCourier:    family := 'Courier New';
+    else
+      family := 'Arial';
+    end;
+  Result := fFonts.ResolveForOutlines(family, fFont.Bold, fFont.Italics);
+  if Result.Face = nil then
+  begin
+    fFonts.Warn(Format('Font "%s" is not installed; its outlines were drawn with Arial.', [fFont.Name]));
+    Result := fFonts.ResolveForOutlines('Arial', fFont.Bold, fFont.Italics);
+  end;
+end;
+
+procedure TsmPDF.DrawTextOutlines(const AText: string; X, Y: Double; AAngle: Double);
+var
+  res: TPDFFontResolution;
+  face: TPDFFontFace;
+  ttf: TTTFFont;
+  ctx: TGdiFontContext;
+  cps: TArray<Cardinal>;
+  cp: Cardinal;
+  gid: Word;
+  outline: TGlyphOutline;
+  sizePt, scale, baselineY, penUnits, ox: Double;
+  i, k: Integer;
+  pts: TArray<TPointF>;
+  rotated: Boolean;
+  r, g, b: Double;
+  halo, underFill: Boolean;
+begin
+  EnsureCanDraw;
+  if AText = '' then Exit;
+  res := OutlineFont;
+  face := res.Face;
+  if face = nil then Exit;
+  ttf := face.TTF;
+
+  sizePt := EffectiveFontSize;
+  scale := PtToPx(sizePt) / ttf.Metrics.UnitsPerEm;   // font units -> page pixels
+  baselineY := Y + PtToPx(BaselineOffsetPt(res, sizePt));
+  cps := TextToCodepoints(AText);
+
+  BeginRotation(X, Y, AAngle, rotated);
+  ctx := nil;
+  fCurrentPage.BeginPathCapture;
+  try
+    penUnits := 0;
+    for cp in cps do
+    begin
+      gid := ttf.GlyphIndex(cp);
+      if gid = 0 then
+        fFonts.Warn(Format('Font "%s" has no glyph for U+%.4X (%s); nothing was drawn for it.',
+          [face.GdiFamily, cp, CodepointToString(cp)]))
+      else
+      begin
+        if not face.TryGetOutline(gid, outline) then
+        begin
+          if ctx = nil then
+            ctx := TGdiFontContext.Create(face.GdiFamily, face.GdiBold, face.GdiItalic,
+              ttf.Metrics.UnitsPerEm);
+          if not ctx.GlyphOutline(gid, outline) then
+            outline := Default(TGlyphOutline);
+          face.AddOutline(gid, outline);
+        end;
+        pts := outline.Points;
+        ox := X + penUnits * scale;
+        k := 0;
+        for i := 0 to High(outline.Commands) do
+          case outline.Commands[i] of
+            gcMoveTo:
+              begin
+                fCurrentPage.UserMoveTo(ox + pts[k].X * scale, baselineY - pts[k].Y * scale);
+                Inc(k);
+              end;
+            gcLineTo:
+              begin
+                fCurrentPage.UserLineTo(ox + pts[k].X * scale, baselineY - pts[k].Y * scale);
+                Inc(k);
+              end;
+            gcCurveTo:
+              begin
+                fCurrentPage.UserCurveTo(
+                  ox + pts[k].X * scale,     baselineY - pts[k].Y * scale,
+                  ox + pts[k + 1].X * scale, baselineY - pts[k + 1].Y * scale,
+                  ox + pts[k + 2].X * scale, baselineY - pts[k + 2].Y * scale);
+                Inc(k, 3);
+              end;
+            gcClose:
+              fCurrentPage.ClosePath;
+          end;
+      end;
+      penUnits := penUnits + ttf.GlyphAdvance(gid);
+    end;
+  finally
+    fCurrentPage.EndPathCapture;
+    ctx.Free;
+  end;
+
+  if fCurrentPage.CapturedPathSize > 0 then
+  begin
+    halo := HaloActive;
+    underFill := halo and (fFont.StrokeMode = smUnderFill);
+    fCurrentPage.SaveState;
+    if halo then
+    begin
+      ColorToRGBFloats(fFont.StrokeColor, r, g, b);
+      fCurrentPage.SetStrokeRGB(r, g, b);
+    end;
+    if underFill then
+    begin
+      fCurrentPage.SetLineWidthPt(2 * HaloWidthPt(sizePt));
+      fCurrentPage.SetLineJoin(1);
+      fCurrentPage.SetLineCap(1);
+      fCurrentPage.AppendCapturedPath;
+      fCurrentPage.Stroke;
+    end;
+    ColorToRGBFloats(fFont.Color, r, g, b);
+    fCurrentPage.SetFillRGB(r, g, b);
+    fCurrentPage.AppendCapturedPath;
+    if halo and not underFill then
+    begin
+      fCurrentPage.SetLineWidthPt(HaloWidthPt(sizePt));
+      fCurrentPage.FillAndStrokeNonZero;
+    end
+    else
+      fCurrentPage.FillNonZero;
+    fCurrentPage.RestoreState;
+  end;
 
   if rotated then
     fCurrentPage.RestoreState;
@@ -1451,7 +1761,7 @@ begin
   y := ATop + (ABottom - ATop - lineHeightPx) / 2;
   if y < ATop then y := ATop;
 
-  EmitOneTextLine(AText, x, y, sizePt);
+  EmitTextLine(AText, x, y + PtToPx(TopToBaselinePt(resolved, sizePt)), sizePt);
 end;
 
 function PaddingMultiplier(APadding: TPDFTextPadding): Double;
@@ -1474,7 +1784,7 @@ end;
 procedure TsmPDF.DrawParagraphInRect(const AText: string; ALeft, ATop, ARight, ABottom: Double;
   AAlignment: TAlignment; APadding: TPDFTextPadding);
 var
-  sizePt, lineHeightPx: Double;
+  sizePt, lineHeightPx, toBaselinePx: Double;
   lines: TStringList;
   i: Integer;
   lineX, lineY, lineWidthPx: Double;
@@ -1489,6 +1799,7 @@ begin
 
   sizePt := EffectiveFontSize;
   lineHeightPx := PtToPx(PaddingMultiplier(APadding) * sizePt);
+  toBaselinePx := PtToPx(TopToBaselinePt(ResolveCurrentFont, sizePt));
 
   lines := WrapLines(AText, sizePt, PxToPt(ARight - ALeft));
   try
@@ -1509,7 +1820,7 @@ begin
       // Stop if we'd drop below the rect (truncates rather than overflowing).
       if lineY > ABottom then Break;
 
-      EmitOneTextLine(lines[i], lineX, lineY, sizePt);
+      EmitTextLine(lines[i], lineX, lineY + toBaselinePx, sizePt);
     end;
   finally
     lines.Free;

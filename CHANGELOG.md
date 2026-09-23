@@ -93,6 +93,22 @@ break source compatibility; they are marked **Breaking**.
 ### Added
 
 - `Warnings: TStrings` — every fallback the library had to make, one line each.
+- `TextOrigin: TPDFTextOrigin` — `toTypoTop` (default, unchanged placement),
+  `toGdiTop` (Y is the top of GDI's cell: the baseline sits at `Y + usWinAscent`
+  and `TextHeight` is `usWinAscent + usWinDescent`, so labels measure and stack
+  exactly as `TCanvas` does), or `toBaseline` (Y is the baseline).
+- `FontMetrics: TPDFTextMetrics` — ascent, descent, line height, cap height and
+  x-height of the current font and size, in page pixels.
+- Map-label halos: `Font.StrokeWidth` (points; overrides the `StrokeStyle`
+  fraction when > 0) and `Font.StrokeMode`. `smUnderFill` strokes the text in
+  `StrokeColor` at twice `StrokeWidth` with round joins and caps, then fills it
+  on top, so `StrokeWidth` of halo shows outside the glyphs. `smOverFill` is the
+  existing render-mode-2 look.
+- `DrawTextOutlines(Text, X, Y, Angle)` — draws text as filled vector paths
+  from GDI glyph outlines (quadratic splines converted to cubics), honouring
+  `Font.Color`, halos, rotation and `TextOrigin`. For icon fonts such as
+  Ionicons and for fonts that cannot be embedded. Outlines are cached per
+  document.
 - `NewPage(AWidthPt, AHeightPt: Double; ADPI = 72; APaperColor = clWhite)` —
   page size in points, used exactly for the MediaBox. At 72 DPI one drawing
   pixel is one point, so callers can work in points directly.

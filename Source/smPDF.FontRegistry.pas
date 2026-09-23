@@ -8,7 +8,7 @@ unit smPDF.FontRegistry;
 interface
 
 uses
-  SysUtils, Classes, Generics.Collections, smPDF.Fonts, smPDF.TTF;
+  SysUtils, Classes, Generics.Collections, smPDF.Fonts, smPDF.TTF, smPDF.GdiFonts;
 
 type
   TPDFFontFace = class
@@ -21,6 +21,7 @@ type
     fGdiBold:     Boolean;
     fGdiItalic:   Boolean;
     fUsedGlyphs:  TDictionary<Word, Cardinal>;  // glyph id -> first code point drawn with it
+    fOutlines:    TDictionary<Word, TGlyphOutline>;
   public
     constructor CreateStandard(AFont: TStandardFont);
     // Takes ownership of ATTF.
@@ -35,6 +36,10 @@ type
     function UsedGlyphs: TArray<Word>;
     function UsedGlyphCodepoint(AGlyph: Word): Cardinal;
     function HasUsedGlyphs: Boolean;
+
+    // Glyph outlines fetched from GDI for DrawTextOutlines, in font units.
+    function TryGetOutline(AGlyph: Word; out AOutline: TGlyphOutline): Boolean;
+    procedure AddOutline(AGlyph: Word; const AOutline: TGlyphOutline);
 
     // Unique within a document; used as the page resource key.
     property Key:        string        read fKey;
@@ -114,9 +119,6 @@ function CodepointToString(ACodepoint: Cardinal): string;
 
 implementation
 
-uses
-  smPDF.GdiFonts;
-
 { TPDFFontFace }
 
 constructor TPDFFontFace.CreateStandard(AFont: TStandardFont);
@@ -142,6 +144,7 @@ end;
 
 destructor TPDFFontFace.Destroy;
 begin
+  fOutlines.Free;
   fUsedGlyphs.Free;
   fTTF.Free;
   inherited;
@@ -171,6 +174,18 @@ end;
 function TPDFFontFace.HasUsedGlyphs: Boolean;
 begin
   Result := (fUsedGlyphs <> nil) and (fUsedGlyphs.Count > 0);
+end;
+
+function TPDFFontFace.TryGetOutline(AGlyph: Word; out AOutline: TGlyphOutline): Boolean;
+begin
+  Result := (fOutlines <> nil) and fOutlines.TryGetValue(AGlyph, AOutline);
+end;
+
+procedure TPDFFontFace.AddOutline(AGlyph: Word; const AOutline: TGlyphOutline);
+begin
+  if fOutlines = nil then
+    fOutlines := TDictionary<Word, TGlyphOutline>.Create;
+  fOutlines.AddOrSetValue(AGlyph, AOutline);
 end;
 
 { TPDFFontRegistry }
