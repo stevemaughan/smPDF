@@ -93,6 +93,10 @@ break source compatibility; they are marked **Breaking**.
 ### Added
 
 - `Warnings: TStrings` — every fallback the library had to make, one line each.
+- `CoordinatePrecision` (0–3 decimals, default 3) for path coordinates. At
+  72 DPI one decimal (0.1 pt) is still invisible in print and about halves the
+  compressed size of polygon-heavy pages; colours, widths and text keep three
+  decimals. The default output is unchanged.
 - Document information: `Title`, `Author`, `Subject`, `Creator`, `Producer`
   (default `'smPDF ' + SMPDF_VERSION`) and `CreationDate` (default: when the
   `TsmPDF` was created), written as an `/Info` dictionary referenced from the

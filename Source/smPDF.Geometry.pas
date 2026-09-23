@@ -26,6 +26,9 @@ function PixelToPdfPoint(AXPixels, AYPixels: Integer; ADpi: Integer;
 // never "-0". Written straight into ABuf; returns the character count.
 function PdfNumberToChars(AValue: Double; var ABuf: TPdfNumberChars): Integer;
 
+// The same with 0 to 3 decimals; 3 is exactly PdfNumberToChars.
+function PdfNumberToCharsPrec(AValue: Double; ADecimals: Integer; var ABuf: TPdfNumberChars): Integer;
+
 function FormatPdfNumber(AValue: Double): string;
 
 implementation
@@ -139,6 +142,58 @@ begin
     ABuf[Result + 2] := AnsiChar(Ord('0') + (frac div 10) mod 10);
     ABuf[Result + 3] := AnsiChar(Ord('0') + frac mod 10);
     Inc(Result, 4);
+    while ABuf[Result - 1] = '0' do
+      Dec(Result);
+  end;
+end;
+
+function PdfNumberToCharsPrec(AValue: Double; ADecimals: Integer; var ABuf: TPdfNumberChars): Integer;
+const
+  SCALE: array[0..2] of Integer = (1, 10, 100);
+var
+  q, intPart: Int64;
+  frac, i, n, d: Integer;
+  digits: array[0..19] of AnsiChar;
+begin
+  if (ADecimals >= 3) or not ((AValue > -FAST_PATH_LIMIT) and (AValue < FAST_PATH_LIMIT)) then
+    Exit(PdfNumberToChars(AValue, ABuf));
+  if ADecimals < 0 then ADecimals := 0;
+
+  q := Round(AValue * SCALE[ADecimals]);
+  if q = 0 then
+  begin
+    ABuf[0] := '0';
+    Exit(1);
+  end;
+  Result := 0;
+  if q < 0 then
+  begin
+    ABuf[0] := '-';
+    Result := 1;
+    q := -q;
+  end;
+  intPart := q div SCALE[ADecimals];
+  frac    := Integer(q mod SCALE[ADecimals]);
+  n := 0;
+  repeat
+    digits[n] := AnsiChar(Ord('0') + intPart mod 10);
+    intPart := intPart div 10;
+    Inc(n);
+  until intPart = 0;
+  for i := n - 1 downto 0 do
+  begin
+    ABuf[Result] := digits[i];
+    Inc(Result);
+  end;
+  if frac <> 0 then
+  begin
+    ABuf[Result] := '.';
+    Inc(Result);
+    for d := ADecimals - 1 downto 0 do
+    begin
+      ABuf[Result] := AnsiChar(Ord('0') + (frac div SCALE[d]) mod 10);
+      Inc(Result);
+    end;
     while ABuf[Result - 1] = '0' do
       Dec(Result);
   end;

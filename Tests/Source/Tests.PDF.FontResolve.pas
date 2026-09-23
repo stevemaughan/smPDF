@@ -267,6 +267,7 @@ var
 begin
   pdf := TsmPDF.Create;
   try
+    pdf.CreationDate := EncodeDate(2026, 9, 23);  // documents built at different moments must match
     pdf.NewPage(612, 792);
     for j := 0 to 3 do
       for i := 0 to High(FAMILIES) do

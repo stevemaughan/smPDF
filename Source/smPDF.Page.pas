@@ -16,6 +16,7 @@ type
     fPathContent:   TPDFByteBuffer;               // path operators captured between BeginPathCapture/EndPathCapture
     fOut:           TPDFByteBuffer;               // where operators are written: fContent or fPathContent
     fClipDepth:     Integer;
+    fCoordDecimals: Integer;                      // decimals for path coordinates (0..3)
     fFontMap:       TDictionary<string, string>;  // PDF font name -> page-local resource name (F1, F2, ...)
     fFontOrder:     TList<string>;                // insertion order for stable iteration
     fImageMap:      TDictionary<string, string>;  // image key -> page-local name (Im1, Im2, ...)
@@ -23,6 +24,7 @@ type
 
     procedure WriteRaw(const AStr: string);
     procedure WriteOp(const AOperator: string; const AOperands: array of Double);
+    procedure WriteCoordOp(const AOperator: string; const AOperands: array of Double);
     function  PdfX(XPx: Double): Double; inline;
     function  PdfY(YPx: Double): Double; inline;
     function  GetWidthPixels: Integer;
@@ -128,6 +130,8 @@ type
     property HeightPixels:  Integer read GetHeightPixels;
     property Dpi:           Integer read fDpi;
     property ClipDepth:     Integer read fClipDepth;
+    // Decimals written for path coordinates (m, l, c, re); 3 by default.
+    property CoordDecimals: Integer read fCoordDecimals write fCoordDecimals;
   end;
 
 implementation
@@ -151,6 +155,7 @@ begin
   fPathContent   := nil;
   fOut           := fContent;
   fClipDepth     := 0;
+  fCoordDecimals := 3;
   fFontMap       := TDictionary<string, string>.Create;
   fFontOrder     := TList<string>.Create;
   fImageMap      := TDictionary<string, string>.Create;
@@ -308,6 +313,19 @@ begin
   fOut.AppendByte(10);
 end;
 
+procedure TPDFPage.WriteCoordOp(const AOperator: string; const AOperands: array of Double);
+var
+  i: Integer;
+begin
+  for i := 0 to High(AOperands) do
+  begin
+    fOut.AppendCoord(AOperands[i], fCoordDecimals);
+    fOut.AppendByte(Ord(' '));
+  end;
+  fOut.AppendAscii(AOperator);
+  fOut.AppendByte(10);
+end;
+
 // ---------- Graphics state ----------
 
 procedure TPDFPage.SaveState;
@@ -371,17 +389,17 @@ end;
 
 procedure TPDFPage.UserMoveTo(XPx, YPx: Double);
 begin
-  fOut.AppendPointOp(PdfX(XPx), PdfY(YPx), 'm');
+  fOut.AppendPointOp(PdfX(XPx), PdfY(YPx), 'm', fCoordDecimals);
 end;
 
 procedure TPDFPage.UserLineTo(XPx, YPx: Double);
 begin
-  fOut.AppendPointOp(PdfX(XPx), PdfY(YPx), 'l');
+  fOut.AppendPointOp(PdfX(XPx), PdfY(YPx), 'l', fCoordDecimals);
 end;
 
 procedure TPDFPage.UserCurveTo(X1Px, Y1Px, X2Px, Y2Px, X3Px, Y3Px: Double);
 begin
-  WriteOp('c', [PdfX(X1Px), PdfY(Y1Px), PdfX(X2Px), PdfY(Y2Px), PdfX(X3Px), PdfY(Y3Px)]);
+  WriteCoordOp('c', [PdfX(X1Px), PdfY(Y1Px), PdfX(X2Px), PdfY(Y2Px), PdfX(X3Px), PdfY(Y3Px)]);
 end;
 
 procedure TPDFPage.UserRectanglePath(X1Px, Y1Px, X2Px, Y2Px: Double);
@@ -392,7 +410,7 @@ begin
   y1 := PdfY(Y1Px);
   x2 := PdfX(X2Px);
   y2 := PdfY(Y2Px);
-  WriteOp('re', [Min(x1, x2), Min(y1, y2), Abs(x2 - x1), Abs(y1 - y2)]);
+  WriteCoordOp('re', [Min(x1, x2), Min(y1, y2), Abs(x2 - x1), Abs(y1 - y2)]);
 end;
 
 procedure TPDFPage.UserOvalPath(X1Px, Y1Px, X2Px, Y2Px: Double);
@@ -409,11 +427,11 @@ begin
   ky := KAPPA * ry;
 
   // Top of ellipse, then four cubic-bezier quadrants going clockwise (in PDF coord sense)
-  WriteOp('m', [cx,            cy + ry]);
-  WriteOp('c', [cx + kx, cy + ry,  cx + rx, cy + ky,  cx + rx, cy]);
-  WriteOp('c', [cx + rx, cy - ky,  cx + kx, cy - ry,  cx,      cy - ry]);
-  WriteOp('c', [cx - kx, cy - ry,  cx - rx, cy - ky,  cx - rx, cy]);
-  WriteOp('c', [cx - rx, cy + ky,  cx - kx, cy + ry,  cx,      cy + ry]);
+  WriteCoordOp('m', [cx,            cy + ry]);
+  WriteCoordOp('c', [cx + kx, cy + ry,  cx + rx, cy + ky,  cx + rx, cy]);
+  WriteCoordOp('c', [cx + rx, cy - ky,  cx + kx, cy - ry,  cx,      cy - ry]);
+  WriteCoordOp('c', [cx - kx, cy - ry,  cx - rx, cy - ky,  cx - rx, cy]);
+  WriteCoordOp('c', [cx - rx, cy + ky,  cx - kx, cy + ry,  cx,      cy + ry]);
   ClosePath;
 end;
 

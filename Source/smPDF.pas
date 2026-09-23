@@ -152,6 +152,7 @@ type
     fCreator:           string;
     fProducer:          string;
     fCreationDate:      TDateTime;
+    fCoordinatePrecision: Integer;
 
     procedure StartPage(AWidthPt, AHeightPt: Double; ADPI: Integer; APaperColor: TColor);
     procedure EnsureCurrentPage;
@@ -194,6 +195,7 @@ type
     function EmitImageObject(AWriter: TPDFWriter; const AData: TPDFImageData): TPDFObjectId;
     function GetOrAddImage(APicture: TPicture): string;
     function GetWidth: Integer;
+    procedure SetCoordinatePrecision(AValue: Integer);
     function GetHeight: Integer;
   public
     constructor Create;
@@ -343,6 +345,12 @@ type
     property Creator:         string          read fCreator      write fCreator;
     property Producer:        string          read fProducer     write fProducer;
     property CreationDate:    TDateTime       read fCreationDate write fCreationDate;
+
+    // Decimals written for path coordinates (moveto, lineto, curveto), 0 to 3.
+    // The default 3 keeps 1/1000 point; at 72 DPI, 1 decimal (0.1 pt, about
+    // 0.035 mm) is still invisible in print and roughly halves the compressed
+    // size of polygon-heavy pages. Colours, widths and text are unaffected.
+    property CoordinatePrecision: Integer     read fCoordinatePrecision write SetCoordinatePrecision;
   end;
 
 implementation
@@ -405,6 +413,7 @@ begin
   fDPI             := 300;
   fTextOrigin      := toTypoTop;
   fProducer        := 'smPDF ' + SMPDF_VERSION;
+  fCoordinatePrecision := 3;
   fCreationDate    := Now;
   fWidthPt         := 595.28;
   fHeightPt        := 841.89;
@@ -431,6 +440,13 @@ end;
 function TsmPDF.PtToPx(APoints: Double): Double;
 begin
   Result := APoints * fDPI / POINTS_PER_INCH;
+end;
+
+procedure TsmPDF.SetCoordinatePrecision(AValue: Integer);
+begin
+  fCoordinatePrecision := EnsureRange(AValue, 0, 3);
+  if fCurrentPage <> nil then
+    fCurrentPage.CoordDecimals := fCoordinatePrecision;
 end;
 
 function TsmPDF.GetWidth: Integer;
@@ -578,6 +594,7 @@ begin
   fPaperColor := APaperColor;
 
   fCurrentPage := TPDFPage.CreatePoints(AWidthPt, AHeightPt, ADPI);
+  fCurrentPage.CoordDecimals := fCoordinatePrecision;
   fPages.Add(fCurrentPage);
 
   // Paint the page background as a full-page filled rectangle. Skipped for

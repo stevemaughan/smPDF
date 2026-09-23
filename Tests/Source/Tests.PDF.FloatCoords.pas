@@ -26,6 +26,10 @@ type
     procedure Test_DrawPolygonF_emitsFractionalPath;
     procedure Test_DrawMultiLineF_emitsFractionalPath;
     procedure Test_DrawBoxAndOval_doubleOverloads;
+    procedure Test_CoordinatePrecision_defaultIsThree;
+    procedure Test_CoordinatePrecision_oneDecimal_roundsPathOnly;
+    procedure Test_CoordinatePrecision_zero_writesIntegers;
+    procedure Test_CoordinatePrecision_isClamped;
   end;
 
 implementation
@@ -298,6 +302,66 @@ begin
   end);
   AssertContains('10.5 751.5 20 20 re', s);
   AssertContains('20.5 771.5 m', s, 'oval starts at the top centre');
+end;
+
+procedure TFloatCoordTests.Test_CoordinatePrecision_defaultIsThree;
+var
+  pdf: TsmPDF;
+begin
+  pdf := TsmPDF.Create;
+  try
+    AssertEquals(3, pdf.CoordinatePrecision);
+  finally
+    pdf.Free;
+  end;
+end;
+
+procedure TFloatCoordTests.Test_CoordinatePrecision_oneDecimal_roundsPathOnly;
+var s: string;
+begin
+  s := Build(procedure(o: TObject)
+  begin
+    TsmPDF(o).CoordinatePrecision := 1;
+    TsmPDF(o).Pen.Color := $00808080;
+    TsmPDF(o).Pen.Width := 0.125;
+    TsmPDF(o).DrawLine(10.12345, 20.5, 100.07, 30.25);
+    TsmPDF(o).BeginPath;
+    TsmPDF(o).MoveTo(1.26, 1);
+    TsmPDF(o).CurveTo(2.26, 2, 3.26, 3, 4.26, 4);
+    TsmPDF(o).StrokePath;
+  end);
+  AssertContains('10.1 771.5 m', s);
+  AssertContains('100.1 761.8 l', s);
+  AssertContains('2.3 790 3.3 789 4.3 788 c', s);
+  AssertContains('0.502 0.502 0.502 RG', s, 'colours keep three decimals');
+  AssertContains('0.125 w', s, 'widths keep three decimals');
+end;
+
+procedure TFloatCoordTests.Test_CoordinatePrecision_zero_writesIntegers;
+var s: string;
+begin
+  s := Build(procedure(o: TObject)
+  begin
+    TsmPDF(o).CoordinatePrecision := 0;
+    TsmPDF(o).DrawLine(10.6, 20.4, -0.4, 30.5);
+  end);
+  AssertContains('11 772 m', s);
+  AssertContains('0 762 l', s);
+end;
+
+procedure TFloatCoordTests.Test_CoordinatePrecision_isClamped;
+var
+  pdf: TsmPDF;
+begin
+  pdf := TsmPDF.Create;
+  try
+    pdf.CoordinatePrecision := 7;
+    AssertEquals(3, pdf.CoordinatePrecision);
+    pdf.CoordinatePrecision := -2;
+    AssertEquals(0, pdf.CoordinatePrecision);
+  finally
+    pdf.Free;
+  end;
 end;
 
 initialization

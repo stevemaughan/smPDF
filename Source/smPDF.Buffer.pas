@@ -29,7 +29,8 @@ type
     procedure AppendNumber(AValue: Double);
     procedure AppendInt(AValue: Int64);
     // "x y <op>\n" — the hot path for m and l.
-    procedure AppendPointOp(AX, AY: Double; AOp: AnsiChar);
+    procedure AppendPointOp(AX, AY: Double; AOp: AnsiChar; ADecimals: Integer = 3);
+    procedure AppendCoord(AValue: Double; ADecimals: Integer);
     procedure AppendBuffer(ASource: TPDFByteBuffer);
 
     function Memory: Pointer;
@@ -150,19 +151,30 @@ begin
   end;
 end;
 
-procedure TPDFByteBuffer.AppendPointOp(AX, AY: Double; AOp: AnsiChar);
+procedure TPDFByteBuffer.AppendCoord(AValue: Double; ADecimals: Integer);
+var
+  chars: TPdfNumberChars;
+  n: Integer;
+begin
+  n := PdfNumberToCharsPrec(AValue, ADecimals, chars);
+  if fSize + n > Length(fData) then Grow(fSize + n);
+  Move(chars[0], fData[fSize], n);
+  Inc(fSize, n);
+end;
+
+procedure TPDFByteBuffer.AppendPointOp(AX, AY: Double; AOp: AnsiChar; ADecimals: Integer);
 var
   chars: TPdfNumberChars;
   n: Integer;
 begin
   if fSize + 2 * PDF_NUMBER_MAX_CHARS + 4 > Length(fData) then
     Grow(fSize + 2 * PDF_NUMBER_MAX_CHARS + 4);
-  n := PdfNumberToChars(AX, chars);
+  n := PdfNumberToCharsPrec(AX, ADecimals, chars);
   Move(chars[0], fData[fSize], n);
   Inc(fSize, n);
   fData[fSize] := Ord(' ');
   Inc(fSize);
-  n := PdfNumberToChars(AY, chars);
+  n := PdfNumberToCharsPrec(AY, ADecimals, chars);
   Move(chars[0], fData[fSize], n);
   Inc(fSize, n);
   fData[fSize] := Ord(' ');
