@@ -378,16 +378,27 @@ var
   m: TTTFFontMetrics;
   fontFileId, descriptorId: TPDFObjectId;
   i: Integer;
-  bytesCopy: TBytes;
+  payload: TBytes;
+  rawLength: Integer;
+  compress: Boolean;
 begin
   m := ATTF.Metrics;
 
-  // FontFile2 — embedded TTF stream with /Length1 = original file length
-  bytesCopy := ATTF.Bytes;
-  fontFileId := AWriter.EmitStreamObject(bytesCopy,
+  // FontFile2 — embedded TTF stream; /Length1 is always the uncompressed length
+  rawLength := Length(ATTF.Bytes);
+  compress  := fCompressStreams;
+  if compress then
+    payload := FlateCompress(ATTF.Bytes)
+  else
+    payload := ATTF.Bytes;
+  fontFileId := AWriter.EmitStreamObject(payload,
     procedure(w: TPDFWriter)
     begin
-      w.WriteName('Length1'); w.WriteInt(Length(bytesCopy));
+      if compress then
+      begin
+        w.WriteName('Filter'); w.WriteName('FlateDecode');
+      end;
+      w.WriteName('Length1'); w.WriteInt(rawLength);
     end);
 
   // FontDescriptor
@@ -604,7 +615,7 @@ begin
 
     SetLength(pageIds, fPages.Count);
     for i := 0 to fPages.Count - 1 do
-      pageIds[i] := fPages[i].Emit(writer, pagesRootId, fontIds, imageIds);
+      pageIds[i] := fPages[i].Emit(writer, pagesRootId, fontIds, imageIds, fCompressStreams);
 
     writer.BeginReservedObject(pagesRootId);
       writer.BeginDict;

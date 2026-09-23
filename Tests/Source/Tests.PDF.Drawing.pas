@@ -63,6 +63,7 @@ begin
   if TFile.Exists(fn) then TFile.Delete(fn);
 
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     ABuild(pdf);

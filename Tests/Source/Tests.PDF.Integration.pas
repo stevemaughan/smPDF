@@ -88,6 +88,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     AssertEquals(0, pdf.PageCount);
   finally
@@ -101,6 +102,7 @@ var
   raised: Boolean;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     raised := False;
     try
@@ -119,6 +121,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage;
     AssertEquals(1, pdf.PageCount);
@@ -134,6 +137,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psLetter, poPortrait, 72);
     AssertEquals(612, pdf.Width,  'Letter portrait 72dpi width');
@@ -149,6 +153,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psLetter, poLandscape, 72);
     AssertEquals(792, pdf.Width,  'Letter landscape 72dpi width');
@@ -164,6 +169,7 @@ var
   raised: Boolean;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     raised := False;
     try
@@ -182,6 +188,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psCustom, poPortrait, 300, clWhite, 1000, 1500);
     AssertEquals(1000, pdf.Width);
@@ -198,6 +205,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     AssertEquals(Integer(clWhite), Integer(pdf.PaperColor),
@@ -212,6 +220,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72, clYellow);
     AssertEquals(Integer(clYellow), Integer(pdf.PaperColor));
@@ -229,6 +238,7 @@ begin
   // saved PDF stays byte-identical to pre-feature output.
   fileName := TempPdf('paper-white.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);   // implicit clWhite
     pdf.Save(fileName);
@@ -248,6 +258,7 @@ var
 begin
   fileName := TempPdf('paper-yellow.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72, clYellow);  // 1 1 0 in RGB floats
     pdf.Save(fileName);
@@ -270,6 +281,7 @@ var
   raised: Boolean;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     raised := False;
     try
@@ -289,6 +301,7 @@ var
   raised: Boolean;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     raised := False;
     try
@@ -311,6 +324,7 @@ var
 begin
   fileName := TempPdf('single.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Save(fileName);
@@ -332,6 +346,7 @@ var
 begin
   fileName := TempPdf('struct.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Save(fileName);
@@ -355,6 +370,7 @@ begin
   // A4 @ 300 dpi: 2480x3508 px (rounded). Back to points: ~595.20 x 841.92 (rounding noise).
   fileName := TempPdf('a4_300.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 300);
     pdf.Save(fileName);
@@ -374,6 +390,7 @@ var
 begin
   fileName := TempPdf('three.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.NewPage(psA4, poPortrait, 72);
@@ -399,6 +416,7 @@ var
 begin
   fileName := TempPdf('letter.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psLetter, poPortrait, 72);
     pdf.Save(fileName);
@@ -415,6 +433,7 @@ var
   w1, h1: Integer;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA3, poLandscape, 72);   // A3 landscape at 72dpi
     w1 := pdf.Width;
@@ -435,6 +454,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72, clYellow);
     pdf.NewPage;
@@ -450,6 +470,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     // psCustom + landscape exercises the custom-dim path through the
     // orientation swap; the second page must end up the same size as the first.
@@ -469,6 +490,7 @@ var
   pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage;   // no previous page -> A4 portrait at 300 dpi
     AssertEquals(Ord(psA4),        Ord(pdf.Size),        'default paper size');
@@ -488,6 +510,7 @@ var
 begin
   fileName := TempPdf('save-returns-bytes.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.DrawText('size check', 50, 50);
@@ -515,6 +538,7 @@ var
 begin
   fileName := TempPdf('tobytes.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.DrawText('in memory', 50, 50);
@@ -534,6 +558,7 @@ var
   raised: Boolean;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     raised := False;
     try
@@ -556,6 +581,7 @@ var
 begin
   ms := TMemoryStream.Create;
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psLetter, poPortrait, 72);
     pdf.DrawBox(20, 20, 300, 200);
@@ -585,6 +611,7 @@ var
 begin
   ms := TMemoryStream.Create;
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     ms.WriteBuffer(PREFIX[0], Length(PREFIX));
     pdf.NewPage(psA4, poPortrait, 72);
@@ -607,6 +634,7 @@ var
   raised: Boolean;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     raised := False;
@@ -629,6 +657,7 @@ var
 begin
   ms := TMemoryStream.Create;
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     raised := False;
     try
@@ -651,6 +680,7 @@ var
 begin
   fileName := TempPdf('no-pages.pdf');
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     try
       pdf.Save(fileName);

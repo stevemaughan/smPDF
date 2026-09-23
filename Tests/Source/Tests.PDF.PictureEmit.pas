@@ -71,6 +71,7 @@ begin
   if TFile.Exists(fn) then TFile.Delete(fn);
 
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     ABuild(pdf);
@@ -350,6 +351,7 @@ var
 begin
   // Existing invariant: any Draw* before NewPage raises EPDFError.
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   pic := TPicture.Create;
   bmp := MakeRGBBitmap(8, 8, clBlack);
   try

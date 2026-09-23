@@ -6,8 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Work towards **2.0.0**, the release that makes smPDF a replacement for Gnostice
+eDocEngine in AlignMix's map export. Several changes below alter output or
+break source compatibility; they are marked **Breaking**.
+
+### Changed
+
+- **`CompressStreams` is now honoured.** It always defaulted to `True` but was
+  never read, so page content and embedded fonts were written raw. Page content
+  streams and `/FontFile2` font programs are now Flate-compressed (`/Length1`
+  keeps the uncompressed font length). The Map demo shrinks from 4.0 MB to
+  0.69 MB. Set `CompressStreams := False` to inspect content bytes.
+
 ### Added
 
+- `Tests/Bench/smPDF_Bench.dpr` — throughput benchmark (1M polygon vertices,
+  2,000 outlined labels, A0 at 72 DPI).
 - `Save(AStream: TStream)` overload — writes the PDF at the stream's current
   position and returns the byte count, so output never has to touch the disk.
 - `ToBytes: TBytes` — returns the complete PDF as a byte array.

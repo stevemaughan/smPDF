@@ -25,7 +25,8 @@ function ExtractImageData(APicture: TPicture): TPDFImageData;
 
 // Compress raw bytes with zlib's FlateDecode. Returned slice is exactly the
 // compressed data (no extra padding).
-function FlateCompress(const ABytes: TBytes): TBytes;
+function FlateCompress(const ABytes: TBytes): TBytes; overload;
+function FlateCompress(AData: Pointer; ACount: NativeInt): TBytes; overload;
 
 // Find a JPEG SOFx (start-of-frame) marker and return width/height/comps.
 // Used by ExtractImageData but exposed for testability.
@@ -38,25 +39,35 @@ uses
   System.ZLib, Vcl.Imaging.JPEG, Vcl.Imaging.PngImage;
 
 function FlateCompress(const ABytes: TBytes): TBytes;
+begin
+  if Length(ABytes) = 0 then
+    Result := FlateCompress(nil, 0)
+  else
+    Result := FlateCompress(@ABytes[0], Length(ABytes));
+end;
+
+function FlateCompress(AData: Pointer; ACount: NativeInt): TBytes;
 var
   outStream: TBytesStream;
   zStream: TZCompressionStream;
+  size: NativeInt;
 begin
   outStream := TBytesStream.Create;
   try
     zStream := TZCompressionStream.Create(outStream);
     try
-      if Length(ABytes) > 0 then
-        zStream.WriteBuffer(ABytes[0], Length(ABytes));
+      if ACount > 0 then
+        zStream.WriteBuffer(AData^, ACount);
     finally
       zStream.Free;
     end;
-    SetLength(Result, outStream.Size);
-    if outStream.Size > 0 then
-      Move(outStream.Memory^, Result[0], outStream.Size);
+    // Hand back the stream's own buffer, trimmed, rather than copying it.
+    Result := outStream.Bytes;
+    size := outStream.Size;
   finally
     outStream.Free;
   end;
+  SetLength(Result, size);
 end;
 
 function ParseJpegFrame(const ABytes: TBytes; out AWidth, AHeight, ABitsPerComp,

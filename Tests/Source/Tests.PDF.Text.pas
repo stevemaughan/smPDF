@@ -98,6 +98,7 @@ begin
   if TFile.Exists(fn) then TFile.Delete(fn);
 
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     ABuild(pdf);
@@ -518,6 +519,7 @@ procedure TTextTests.Test_TextWidth_emptyStringIsZero;
 var pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     AssertEquals(0, pdf.TextWidth(''));
@@ -530,6 +532,7 @@ procedure TTextTests.Test_TextWidth_nonEmptyIsPositive;
 var pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     AssertTrue(pdf.TextWidth('Hello') > 0, 'TextWidth("Hello") should be positive');
@@ -544,6 +547,7 @@ var
   w12, w24: Integer;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Font.Size := 12;  w12 := pdf.TextWidth('Hello');
@@ -562,6 +566,7 @@ var
   wReg, wBold: Integer;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Font.Size := 24;
@@ -578,6 +583,7 @@ procedure TTextTests.Test_TextHeight_isLineHeightInPixels;
 var pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Font.Size := 12;
@@ -592,6 +598,7 @@ procedure TTextTests.Test_TextHeight_emptyStringStillReturnsLineHeight;
 var pdf: TsmPDF;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Font.Size := 12;
@@ -607,6 +614,7 @@ var
   ext: TSize;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Font.Size := 12;
@@ -624,6 +632,7 @@ var
   ext: TSize;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Font.Size := 12;
@@ -643,6 +652,7 @@ var
   ext: TSize;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Font.Size := 12;
@@ -664,6 +674,7 @@ var
   single, double: TSize;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     pdf.Font.Size := 12;
@@ -682,6 +693,7 @@ var
   ext: TSize;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     pdf.NewPage(psA4, poPortrait, 72);
     ext := pdf.MeasureParagraph('', 500, tpSingle);
@@ -698,6 +710,7 @@ var
   raised: Boolean;
 begin
   pdf := TsmPDF.Create;
+  pdf.CompressStreams := False;
   try
     raised := False;
     try

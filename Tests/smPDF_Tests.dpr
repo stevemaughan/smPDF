@@ -5,6 +5,7 @@ program smPDF_Tests;
 uses
   System.SysUtils,
   smPDF.TestFramework in 'Source\smPDF.TestFramework.pas',
+  Tests.PDF.Helpers in 'Source\Tests.PDF.Helpers.pas',
   Tests.PDF.Geometry in 'Source\Tests.PDF.Geometry.pas',
   Tests.PDF.Writer in 'Source\Tests.PDF.Writer.pas',
   Tests.PDF.Pages in 'Source\Tests.PDF.Pages.pas',
@@ -16,7 +17,8 @@ uses
   Tests.PDF.TTFEmit in 'Source\Tests.PDF.TTFEmit.pas',
   Tests.PDF.Images in 'Source\Tests.PDF.Images.pas',
   Tests.PDF.PictureEmit in 'Source\Tests.PDF.PictureEmit.pas',
-  Tests.PDF.Integration in 'Source\Tests.PDF.Integration.pas';
+  Tests.PDF.Integration in 'Source\Tests.PDF.Integration.pas',
+  Tests.PDF.Compression in 'Source\Tests.PDF.Compression.pas';
 
 var
   results: TArray<TTestResult>;

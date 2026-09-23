@@ -8,6 +8,7 @@ uses
 
 type
   ETestFailed = class(Exception);
+  ETestSkipped = class(Exception);
 
   TTestCase = class
   protected
@@ -15,6 +16,9 @@ type
     procedure TearDown; virtual;
 
     procedure Fail(const AMsg: string);
+    // Ends the test without failing it. For tests that depend on something
+    // the machine may not have (an installed font, mutool on the PATH).
+    procedure Skip(const AReason: string);
 
     procedure AssertTrue(ACondition: Boolean; const AMsg: string = '');
     procedure AssertFalse(ACondition: Boolean; const AMsg: string = '');
@@ -45,7 +49,7 @@ type
     class function Classes: TList<TTestCaseClass>;
   end;
 
-  TTestStatus = (tsPassed, tsFailed, tsError);
+  TTestStatus = (tsPassed, tsFailed, tsError, tsSkipped);
 
   TTestResult = record
     ClassName: string;
@@ -81,6 +85,11 @@ end;
 procedure TTestCase.Fail(const AMsg: string);
 begin
   raise ETestFailed.Create(AMsg);
+end;
+
+procedure TTestCase.Skip(const AReason: string);
+begin
+  raise ETestSkipped.Create(AReason);
 end;
 
 procedure TTestCase.AssertTrue(ACondition: Boolean; const AMsg: string);
@@ -226,6 +235,11 @@ begin
                 instance.TearDown;
               end;
             except
+              on E: ETestSkipped do
+              begin
+                res.Status := tsSkipped;
+                res.Message := E.Message;
+              end;
               on E: ETestFailed do
               begin
                 res.Status := tsFailed;
@@ -257,17 +271,18 @@ end;
 class procedure TTestRunner.WriteConsole(const AResults: TArray<TTestResult>);
 var
   r: TTestResult;
-  passed, failed, errors: Integer;
+  passed, failed, errors, skipped: Integer;
   totalMs: Double;
   prefix: string;
 begin
-  passed := 0; failed := 0; errors := 0; totalMs := 0;
+  passed := 0; failed := 0; errors := 0; skipped := 0; totalMs := 0;
   for r in AResults do
   begin
     case r.Status of
       tsPassed: begin Inc(passed); prefix := '  PASS'; end;
       tsFailed: begin Inc(failed); prefix := '  FAIL'; end;
       tsError:  begin Inc(errors); prefix := ' ERROR'; end;
+      tsSkipped: begin Inc(skipped); prefix := '  SKIP'; end;
     end;
     totalMs := totalMs + r.DurationMs;
     Writeln(Format('%s  %s.%s  (%.2f ms)', [prefix, r.ClassName, r.MethodName, r.DurationMs]));
@@ -275,15 +290,15 @@ begin
       Writeln('        ' + r.Message);
   end;
   Writeln('');
-  Writeln(Format('Tests: %d passed, %d failed, %d errors  (%.2f ms total)',
-    [passed, failed, errors, totalMs]));
+  Writeln(Format('Tests: %d passed, %d failed, %d errors, %d skipped  (%.2f ms total)',
+    [passed, failed, errors, skipped, totalMs]));
 end;
 
 class procedure TTestRunner.WriteJUnit(const AFileName: string; const AResults: TArray<TTestResult>);
 var
   sb: TStringBuilder;
   r: TTestResult;
-  failures, errors, total: Integer;
+  failures, errors, skipped, total: Integer;
   totalSecs: Double;
 
   function Esc(const S: string): string;
@@ -296,19 +311,20 @@ var
   end;
 
 begin
-  failures := 0; errors := 0; total := Length(AResults); totalSecs := 0;
+  failures := 0; errors := 0; skipped := 0; total := Length(AResults); totalSecs := 0;
   for r in AResults do
   begin
     if r.Status = tsFailed then Inc(failures);
     if r.Status = tsError then Inc(errors);
+    if r.Status = tsSkipped then Inc(skipped);
     totalSecs := totalSecs + r.DurationMs / 1000.0;
   end;
 
   sb := TStringBuilder.Create;
   try
     sb.AppendLine('<?xml version="1.0" encoding="UTF-8"?>');
-    sb.AppendLine(Format('<testsuite name="smPDF" tests="%d" failures="%d" errors="%d" time="%.3f">',
-      [total, failures, errors, totalSecs]));
+    sb.AppendLine(Format('<testsuite name="smPDF" tests="%d" failures="%d" errors="%d" skipped="%d" time="%.3f">',
+      [total, failures, errors, skipped, totalSecs]));
     for r in AResults do
     begin
       sb.AppendFormat('  <testcase classname="%s" name="%s" time="%.3f"',
@@ -327,6 +343,12 @@ begin
             sb.AppendLine(Format('    <error message="%s"/>', [Esc(r.Message)]));
             sb.AppendLine('  </testcase>');
           end;
+        tsSkipped:
+          begin
+            sb.AppendLine('>');
+            sb.AppendLine(Format('    <skipped message="%s"/>', [Esc(r.Message)]));
+            sb.AppendLine('  </testcase>');
+          end;
       end;
     end;
     sb.AppendLine('</testsuite>');
@@ -342,7 +364,7 @@ var
 begin
   Result := 0;
   for r in AResults do
-    if r.Status <> tsPassed then Inc(Result);
+    if r.Status in [tsFailed, tsError] then Inc(Result);
 end;
 
 end.

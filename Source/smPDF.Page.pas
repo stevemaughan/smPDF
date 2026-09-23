@@ -31,7 +31,8 @@ type
 
     function Emit(AWriter: TPDFWriter; AParentId: TPDFObjectId;
       AFontIds: TDictionary<string, TPDFObjectId> = nil;
-      AImageIds: TDictionary<string, TPDFObjectId> = nil): TPDFObjectId;
+      AImageIds: TDictionary<string, TPDFObjectId> = nil;
+      ACompress: Boolean = False): TPDFObjectId;
 
     // ---------- Page-local font resource registry ----------
     // Returns the page-local resource name (F1, F2, ...) for the given PDF font
@@ -103,7 +104,7 @@ type
 implementation
 
 uses
-  Math, smPDF.Geometry;
+  Math, smPDF.Geometry, smPDF.Images;
 
 constructor TPDFPage.Create(AWidthPixels, AHeightPixels, ADpi: Integer);
 begin
@@ -455,7 +456,8 @@ end;
 
 function TPDFPage.Emit(AWriter: TPDFWriter; AParentId: TPDFObjectId;
   AFontIds: TDictionary<string, TPDFObjectId> = nil;
-  AImageIds: TDictionary<string, TPDFObjectId> = nil): TPDFObjectId;
+  AImageIds: TDictionary<string, TPDFObjectId> = nil;
+  ACompress: Boolean = False): TPDFObjectId;
 var
   contentBytes: TBytes;
   contentId, pageId: TPDFObjectId;
@@ -463,11 +465,22 @@ var
   fontObjId, imageObjId: TPDFObjectId;
   hasFonts, hasImages: Boolean;
 begin
-  SetLength(contentBytes, fContentStream.Size);
-  if fContentStream.Size > 0 then
-    Move(fContentStream.Memory^, contentBytes[0], fContentStream.Size);
-
-  contentId := AWriter.EmitStreamObject(contentBytes);
+  if ACompress then
+  begin
+    contentBytes := FlateCompress(fContentStream.Memory, fContentStream.Size);
+    contentId := AWriter.EmitStreamObject(contentBytes,
+      procedure(w: TPDFWriter)
+      begin
+        w.WriteName('Filter'); w.WriteName('FlateDecode');
+      end);
+  end
+  else
+  begin
+    SetLength(contentBytes, fContentStream.Size);
+    if fContentStream.Size > 0 then
+      Move(fContentStream.Memory^, contentBytes[0], fContentStream.Size);
+    contentId := AWriter.EmitStreamObject(contentBytes);
+  end;
 
   hasFonts  := (AFontIds  <> nil) and (fFontOrder.Count  > 0);
   hasImages := (AImageIds <> nil) and (fImageOrder.Count > 0);
