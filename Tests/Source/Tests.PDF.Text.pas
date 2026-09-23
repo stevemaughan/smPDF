@@ -307,24 +307,24 @@ procedure TTextTests.Test_DrawText_rightAlignedInRect_textEndsAtRectRight;
 var s: string;
 begin
   // Rect 300x40 (px=pt at 72dpi). Auto-size: 40/1.2 = 33.333pt is height-limited.
-  // Helvetica "Hello" = 2278 units / 1000 -> 75.93pt at 33.333pt. Right-aligned x = 400 - 76 = 324.
+  // Helvetica "Hello" = 2278 units / 1000 -> 75.933pt at 33.333pt. Right-aligned x = 400 - 75.933 = 324.067.
   s := SavedAsString(procedure(o: TObject)
   begin
     TsmPDF(o).DrawText('Hello', TRect.Create(100, 200, 400, 240), taRightJustify);
   end);
-  AssertContains('1 0 0 1 324 ', s, 'right-aligned text ends near rect.Right');
+  AssertContains('1 0 0 1 324.067 ', s, 'right-aligned text ends at rect.Right');
 end;
 
 procedure TTextTests.Test_DrawText_centerAlignedInRect_textCentered;
 var s: string;
 begin
-  // Rect 300x40. Auto-size 33.333pt. "Hi" = 944/1000 -> 31.46pt at 33.333pt -> 31 px.
-  // Center: 100 + Round((300 - 31) / 2) = 100 + 134 = 234.
+  // Rect 300x40. Auto-size 33.333pt. "Hi" = 944/1000 -> 31.467pt at 33.333pt.
+  // Center: 100 + (300 - 31.467) / 2 = 234.267.
   s := SavedAsString(procedure(o: TObject)
   begin
     TsmPDF(o).DrawText('Hi', TRect.Create(100, 200, 400, 240), taCenter);
   end);
-  AssertContains('1 0 0 1 234 ', s);
+  AssertContains('1 0 0 1 234.267 ', s);
 end;
 
 procedure TTextTests.Test_DrawText_inRect_autoSizesToFitHeight;
@@ -770,10 +770,10 @@ begin
     TsmPDF(o).Brush.Color := clYellow;
     TsmPDF(o).DrawText('Hi', 100, 200);
   end);
-  // 72dpi A4 page = 595x842 pt. Helvetica 12pt 'Hi' = 944/1000 * 12 = 11.328 -> 11px wide.
-  // TextHeight = 1.2 * 12 = 14.4 -> 14px. Rect (100,200,111,214) in pixels.
-  // PDF Y-flip via FlipYPixels: Y_pdf = (842 - 1 - Y_px). ll = (100, 842-1-214) = (100, 627).
-  AssertContains('100 627 11 14 re', s,
+  // 72dpi A4 page = 595.28x841.89 pt. Helvetica 12pt 'Hi' = 944/1000 * 12 = 11.328 px wide.
+  // TextHeight = 1.2 * 12 = 14.4 px. Rect (100,200,111.328,214.4) in pixels.
+  // PDF Y-flip: Y_pdf = 841.89 - Y_px. ll = (100, 841.89-214.4) = (100, 627.49).
+  AssertContains('100 627.49 11.328 14.4 re', s,
     'background rect = (X, Y, X+TextWidth, Y+TextHeight) in PDF coords');
 end;
 
@@ -786,8 +786,8 @@ begin
     TsmPDF(o).Brush.Color := clYellow;
     TsmPDF(o).DrawText('Hi', TRect.Create(100, 200, 400, 240), taCenter);
   end);
-  // ARect (100,200,400,240) px. Y-flip: ll = (100, 842-1-240) = (100, 601). w=300, h=40.
-  AssertContains('100 601 300 40 re', s,
+  // ARect (100,200,400,240) px. Y-flip: ll = (100, 841.89-240) = (100, 601.89). w=300, h=40.
+  AssertContains('100 601.89 300 40 re', s,
     'background rect matches the supplied ARect in PDF coords');
 end;
 
@@ -893,18 +893,18 @@ end;
 procedure TTextTests.Test_DrawText_ninetyDegrees_cmValuesMatchFormula;
 var s: string;
 begin
-  // 72 DPI A4: pageHeightPx = 842. For pivot user (100, 100):
-  //   PDF pivot = (100, 842 - 1 - 100) = (100, 741) [points; 1 px = 1 pt at 72 dpi]
+  // 72 DPI A4: page height = 841.89 pt. For pivot user (100, 100):
+  //   PDF pivot = (100, 841.89 - 100) = (100, 741.89) [points; 1 px = 1 pt at 72 dpi]
   //   AAngle = 90  =>  cos = 0, sin = 1
   //   cm = [cos, sin, -sin, cos, ex, ey]
   //      = [0, 1, -1, 0, px*(1-cos)+py*sin, py*(1-cos)-px*sin]
-  //      = [0, 1, -1, 0, 100*1 + 741*1, 741*1 - 100*1]
-  //      = [0, 1, -1, 0, 841, 641]
+  //      = [0, 1, -1, 0, 100 + 741.89, 741.89 - 100]
+  //      = [0, 1, -1, 0, 841.89, 641.89]
   s := SavedAsString(procedure(o: TObject)
   begin
     TsmPDF(o).DrawText('Up', 100, 100, 90);
   end);
-  AssertContains('0 1 -1 0 841 641 cm', s,
+  AssertContains('0 1 -1 0 841.89 641.89 cm', s,
     '90 deg CCW rotation around user (100,100) at 72dpi A4 emits the expected affine');
 end;
 

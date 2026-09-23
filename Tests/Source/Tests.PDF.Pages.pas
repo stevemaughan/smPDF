@@ -353,11 +353,11 @@ procedure TPageTests.Test_UserMoveTo_emitsM_withConvertedPoint;
 var page: TPDFPage;
 begin
   // 612x792 page at 72 dpi -> 1 px = 1 pt. (10, 20) in user coords (top-left, Y down)
-  // becomes (10, 791-20) = (10, 771) in PDF coords (bottom-left, Y up).
+  // becomes (10, 792-20) = (10, 772) in PDF coords (bottom-left, Y up).
   page := TPDFPage.Create(612, 792, 72);
   try
     page.UserMoveTo(10, 20);
-    AssertContains('10 771 m', PageBytes(page));
+    AssertContains('10 772 m', PageBytes(page));
   finally
     page.Free;
   end;
@@ -369,7 +369,7 @@ begin
   page := TPDFPage.Create(612, 792, 72);
   try
     page.UserLineTo(100, 200);
-    AssertContains('100 591 l', PageBytes(page));   // 791 - 200 = 591
+    AssertContains('100 592 l', PageBytes(page));   // 792 - 200 = 592
   finally
     page.Free;
   end;
@@ -378,12 +378,12 @@ end;
 procedure TPageTests.Test_UserRectanglePath_emitsRe_withConvertedDimensions;
 var page: TPDFPage;
 begin
-  // user (10,20)..(110,120) at 72dpi/72dpi: PDF lower-left = (10, 791-120) = (10, 671)
+  // user (10,20)..(110,120) at 72dpi/72dpi: PDF lower-left = (10, 792-120) = (10, 672)
   // width 100, height 100
   page := TPDFPage.Create(612, 792, 72);
   try
     page.UserRectanglePath(10, 20, 110, 120);
-    AssertContains('10 671 100 100 re', PageBytes(page));
+    AssertContains('10 672 100 100 re', PageBytes(page));
   finally
     page.Free;
   end;
@@ -594,12 +594,12 @@ end;
 procedure TPageTests.Test_SetTextMatrixUserBaseline_emitsFlippedY;
 var page: TPDFPage;
 begin
-  // 612x792 page at 72 dpi -> 1 px = 1 pt. Baseline at user (50, 100) -> PDF (50, 691)
-  // because 791 - 100 = 691.
+  // 612x792 page at 72 dpi -> 1 px = 1 pt. Baseline at user (50, 100) -> PDF (50, 692)
+  // because 792 - 100 = 692.
   page := TPDFPage.Create(612, 792, 72);
   try
     page.SetTextMatrixUserBaseline(50, 100);
-    AssertContains('1 0 0 1 50 691 Tm', PageBytes(page));
+    AssertContains('1 0 0 1 50 692 Tm', PageBytes(page));
   finally
     page.Free;
   end;

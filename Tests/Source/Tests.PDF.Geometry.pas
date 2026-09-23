@@ -117,19 +117,20 @@ end;
 
 procedure TGeometryTests.Test_FlipY_topRow_becomesBottomRow;
 begin
-  AssertEquals(2999, FlipYPixels(0, 3000), 'y=0 in 3000-tall page becomes 2999');
+  // PDF's origin is the bottom edge, so the top edge (y=0) maps to the page height.
+  AssertEquals(3000, FlipYPixels(0, 3000), 'y=0 in 3000-tall page becomes 3000');
 end;
 
 procedure TGeometryTests.Test_FlipY_bottomRow_becomesTopRow;
 begin
-  AssertEquals(0, FlipYPixels(2999, 3000));
+  AssertEquals(0, FlipYPixels(3000, 3000));
 end;
 
 procedure TGeometryTests.Test_FlipY_middle_unchanged;
 begin
-  // for an odd-sized page the middle row is symmetric about (h-1)/2
-  // 100-tall page: y=49.5 is the centre line; y=49 flips to y=50
-  AssertEquals(50, FlipYPixels(49, 100));
+  // 100-tall page: y=50 is the centre line
+  AssertEquals(50, FlipYPixels(50, 100));
+  AssertEquals(51, FlipYPixels(49, 100));
 end;
 
 procedure TGeometryTests.Test_PixelToPdfPoint_topLeft_becomesTopOfPage;
@@ -137,18 +138,18 @@ var
   p: TPDFPointF;
 begin
   // Letter page at 72 DPI: 612x792 pixels = 612x792 points.
-  // Top-left in user coords (0,0) becomes (0, 791) in PDF (just below top edge).
+  // Top-left in user coords (0,0) becomes (0, 792) in PDF: the top edge.
   p := PixelToPdfPoint(0, 0, 72, 792);
   AssertEquals(0.0, p.X, 1e-9);
-  AssertEquals(791.0, p.Y, 1e-9, 'top row in 792-pixel page maps to y=791 in PDF coords');
+  AssertEquals(792.0, p.Y, 1e-9, 'top edge of a 792-pixel page maps to y=792 in PDF coords');
 end;
 
 procedure TGeometryTests.Test_PixelToPdfPoint_bottomLeft_becomesOrigin;
 var
   p: TPDFPointF;
 begin
-  // Bottom-left pixel (0, 791) maps to PDF origin (0, 0)
-  p := PixelToPdfPoint(0, 791, 72, 792);
+  // Bottom-left corner (0, 792) maps to PDF origin (0, 0)
+  p := PixelToPdfPoint(0, 792, 72, 792);
   AssertEquals(0.0, p.X, 1e-9);
   AssertEquals(0.0, p.Y, 1e-9);
 end;
@@ -160,11 +161,10 @@ begin
   // Letter @ 300 DPI: 2550x3300 pixels.
   // Pixel (300, 300) = (1in, 1in from top-left) = (72pt, height-72pt) in PDF
   // height in points = 3300 * 72/300 = 792
-  // expected PDF y = 792 - 72 = 720, but using FlipYPixels then convert:
-  // flippedY = 3299 - 300 = 2999, in points: 2999 * 72/300 = 719.76
+  // expected PDF y = 792 - 72 = 720
   p := PixelToPdfPoint(300, 300, 300, 3300);
   AssertEquals(72.0, p.X, 1e-9);
-  AssertEquals(719.76, p.Y, 1e-3);
+  AssertEquals(720.0, p.Y, 1e-9);
 end;
 
 procedure TGeometryTests.Test_FormatPdfNumber_integer_noDecimals;

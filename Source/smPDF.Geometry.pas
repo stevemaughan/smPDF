@@ -48,7 +48,7 @@ end;
 
 function FlipYPixels(AYPixels, APageHeightPixels: Integer): Integer;
 begin
-  Result := (APageHeightPixels - 1) - AYPixels;
+  Result := APageHeightPixels - AYPixels;
 end;
 
 function PixelToPdfPoint(AXPixels, AYPixels: Integer; ADpi: Integer;

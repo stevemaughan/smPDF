@@ -49,12 +49,13 @@ type
   TPDFLineCap  = (lcButt, lcRound, lcSquare);
   TPDFLineJoin = (ljMiter, ljRound, ljBevel);
 
-  TPDFPointList = TList<TPoint>;
+  TPDFPointList  = TList<TPoint>;
+  TPDFPointFList = TList<TPointF>;
 
   TPDFFont = class
   strict private
     fName:        string;
-    fSize:        Integer;
+    fSize:        Double;
     fColor:       TColor;
     fStrokeColor: TColor;
     fUnderline:   Boolean;
@@ -65,7 +66,8 @@ type
     constructor Create;
 
     property Name:        string          read fName        write fName;
-    property Size:        Integer         read fSize        write fSize;
+    // Points. Fractional sizes are written as given (e.g. 7.35).
+    property Size:        Double          read fSize        write fSize;
     property Color:       TColor          read fColor       write fColor;
     property Bold:        Boolean         read fBold        write fBold;
     property Italics:     Boolean         read fItalics     write fItalics;
@@ -107,10 +109,8 @@ type
     fSize:            TPDFPaperSize;
     fOrientation:     TPDFOrientation;
     fDPI:             Integer;
-    fHeight:          Integer;
-    fWidth:           Integer;
-    fCustomWidth:     Integer;     // user-supplied AWidth from last NewPage (only used for psCustom)
-    fCustomHeight:    Integer;     // user-supplied AHeight from last NewPage (only used for psCustom)
+    fWidthPt:         Double;
+    fHeightPt:        Double;
     fPaperColor:      TColor;
     fCompressStreams: Boolean;
     fPen:             TPDFPen;
@@ -122,9 +122,21 @@ type
     fImageData:         TDictionary<string, TPDFImageData>;   // image key -> extracted data
     fImageKeyByPicture: TDictionary<TObject, string>;         // TPicture pointer -> key (for dedup)
 
-    procedure ResolvePaperSize(APaperSize: TPDFPaperSize; ADPI, AWidth, AHeight: Integer; out AWidthPx, AHeightPx: Integer);
+    procedure StartPage(AWidthPt, AHeightPt: Double; ADPI: Integer; APaperColor: TColor);
     procedure EnsureCurrentPage;
-    procedure EmitOneTextLine(const AText: string; X, Y: Integer; ASizePt: Double);
+    function  PxToPt(APixels: Double): Double; inline;
+    function  PtToPx(APoints: Double): Double; inline;
+    function  EffectiveFontSize: Double;
+    procedure MeasureTextPx(const AText: string; out AWidthPx, AHeightPx: Double);
+    procedure EmitOneTextLine(const AText: string; X, Y: Double; ASizePt: Double);
+    procedure DrawTextInRect(const AText: string; ALeft, ATop, ARight, ABottom: Double;
+      AAlignment: TAlignment);
+    procedure DrawParagraphInRect(const AText: string; ALeft, ATop, ARight, ABottom: Double;
+      AAlignment: TAlignment; APadding: TPDFTextPadding);
+    function  MeasureParagraphF(const AText: string; AMaxWidthPx: Double;
+      APadding: TPDFTextPadding): TSizeF;
+    procedure DrawPictureInRect(const APicture: TPicture; ALeft, ATop, ARight, ABottom: Double;
+      AAlignment: TAlignment; AStretch: Boolean);
 
     function ResolveCurrentFont: TPDFResolvedFont;
     function MeasureWidthPt(const AResolved: TPDFResolvedFont; ASizePt: Double; const AAnsi: AnsiString): Double;
@@ -135,13 +147,20 @@ type
     function EmitTrueTypeFont(AWriter: TPDFWriter; ATTF: TTTFFont): TPDFObjectId;
     function EmitImageObject(AWriter: TPDFWriter; const AData: TPDFImageData): TPDFObjectId;
     function GetOrAddImage(APicture: TPicture): string;
+    function GetWidth: Integer;
+    function GetHeight: Integer;
   public
     constructor Create;
     destructor  Destroy; override;
 
+    // AWidth / AHeight are pixels at ADPI and only used for psCustom.
     procedure NewPage(const APaperSize: TPDFPaperSize; const AOrientation: TPDFOrientation;
       const ADPI: Integer = 300; const APaperColor: TColor = clWhite;
       const AWidth: Integer = 0; const AHeight: Integer = 0); overload;
+    // Page size in points, used exactly for the MediaBox. At ADPI = 72 one
+    // drawing pixel is one point, so coordinates can be given in points.
+    procedure NewPage(const AWidthPt, AHeightPt: Double; const ADPI: Integer = 72;
+      const APaperColor: TColor = clWhite); overload;
     procedure NewPage; overload;
 
     // Save returns the number of bytes written. The stream overload writes at
@@ -156,38 +175,52 @@ type
     // -90 = reads downward, 180 = upside down. The Brush text-background,
     // Font.Underline, and Font.StrokeStyle outline all rotate with the text.
     procedure DrawText(const AText: string; X, Y: Integer; AAngle: Double = 0); overload;
+    procedure DrawText(const AText: string; X, Y: Double; AAngle: Double = 0); overload;
+    // The rect overloads pick the largest font size that fits the text in the
+    // rectangle (they ignore Font.Size); they are not VCL TextRect.
     procedure DrawText(const AText: string; ARect: TRect); overload;
     procedure DrawText(const AText: string; ARect: TRect; AAlignment: TAlignment); overload;
     procedure DrawParagraph(const AText: string; ARect: TRect; AAlignment: TAlignment;
       APadding: TPDFTextPadding);
 
     // Measure text in pixels at the current page DPI, using the current Font
-    // (Name/Size/Bold/Italics). All four require an active page (NewPage first)
-    // so DPI is unambiguous.
+    // (Name/Size/Bold/Italics). All require an active page (NewPage first)
+    // so DPI is unambiguous. The F variants return unrounded values.
     function TextWidth(const AText: string): Integer;
     function TextHeight(const AText: string): Integer;
     function TextExtent(const AText: string): TSize;
+    function TextWidthF(const AText: string): Double;
+    function TextHeightF(const AText: string): Double;
+    function TextExtentF(const AText: string): TSizeF;
 
     // Word-wrap AText into AMaxWidthPx using the same path as DrawParagraph and
     // return the resulting block size (widest line × N lines × line-height).
     function MeasureParagraph(const AText: string; AMaxWidthPx: Integer; APadding: TPDFTextPadding = tpSingle): TSize;
 
-    procedure DrawLine(const x1, y1, x2, y2: Integer);
-    procedure DrawBox(const x1, y1, x2, y2: Integer);
-    procedure DrawOval(const x1, y1, x2, y2: Integer);
-    procedure DrawMultiLine(const APointList: TPDFPointList);
+    procedure DrawLine(const x1, y1, x2, y2: Integer); overload;
+    procedure DrawLine(const x1, y1, x2, y2: Double); overload;
+    procedure DrawBox(const x1, y1, x2, y2: Integer); overload;
+    procedure DrawBox(const x1, y1, x2, y2: Double); overload;
+    procedure DrawOval(const x1, y1, x2, y2: Integer); overload;
+    procedure DrawOval(const x1, y1, x2, y2: Double); overload;
+    procedure DrawMultiLine(const APointList: TPDFPointList); overload;
+    procedure DrawMultiLine(const APointList: TPDFPointFList); overload;
 
     // DrawPolygon walks the point list as a closed polygon. Whenever a point
     // equals the start of the current subpath, the subpath is closed and the
     // next point begins a new subpath. Nested subpaths become holes via the
     // even-odd fill rule. An unclosed final subpath is auto-closed at the end.
     procedure DrawPolygon(const APointList: TPDFPointList); overload;
+    procedure DrawPolygon(const APointList: TPDFPointFList); overload;
 
     // Same, but constrained to the given rectangle. Polygon geometry outside
     // the rect is hidden by a PDF clip path; coordinates are not modified.
     procedure DrawPolygon(const APointList: TPDFPointList; AClipRect: TRect); overload;
+    procedure DrawPolygon(const APointList: TPDFPointFList; AClipRect: TRectF); overload;
 
     procedure DrawPicture(const APicture: TPicture; ARect: TRect;
+      AAlignment: TAlignment = taLeftJustify; AStretch: Boolean = False); overload;
+    procedure DrawPicture(const APicture: TPicture; ARect: TRectF;
       AAlignment: TAlignment = taLeftJustify; AStretch: Boolean = False); overload;
     procedure DrawPicture(const APicture: TPicture; x1, y1: Integer); overload;
 
@@ -195,8 +228,12 @@ type
 
     property Size:            TPDFPaperSize   read fSize;
     property Orientation:     TPDFOrientation read fOrientation;
-    property Width:           Integer         read fWidth;
-    property Height:          Integer         read fHeight;
+    // Current page size in pixels at the page DPI, rounded.
+    property Width:           Integer         read GetWidth;
+    property Height:          Integer         read GetHeight;
+    // Current page size in points, exact.
+    property WidthPt:         Double          read fWidthPt;
+    property HeightPt:        Double          read fHeightPt;
     property DPI:             Integer         read fDPI;
     property CompressStreams: Boolean         read fCompressStreams write fCompressStreams;
     property Font:            TPDFFont        read fFont;
@@ -260,8 +297,8 @@ begin
   fSize            := psA4;
   fOrientation     := poPortrait;
   fDPI             := 300;
-  fCustomWidth     := 0;
-  fCustomHeight    := 0;
+  fWidthPt         := 595.28;
+  fHeightPt        := 841.89;
 end;
 
 destructor TsmPDF.Destroy;
@@ -274,6 +311,32 @@ begin
   fBrush.Free;
   fPen.Free;
   inherited;
+end;
+
+function TsmPDF.PxToPt(APixels: Double): Double;
+begin
+  Result := APixels * POINTS_PER_INCH / fDPI;
+end;
+
+function TsmPDF.PtToPx(APoints: Double): Double;
+begin
+  Result := APoints * fDPI / POINTS_PER_INCH;
+end;
+
+function TsmPDF.GetWidth: Integer;
+begin
+  Result := PointsToPixels(fWidthPt, fDPI);
+end;
+
+function TsmPDF.GetHeight: Integer;
+begin
+  Result := PointsToPixels(fHeightPt, fDPI);
+end;
+
+function TsmPDF.EffectiveFontSize: Double;
+begin
+  Result := fFont.Size;
+  if Result <= 0 then Result := 12;
 end;
 
 function TsmPDF.ResolveCurrentFont: TPDFResolvedFont;
@@ -445,68 +508,39 @@ begin
   AWriter.EndObject;
 end;
 
-procedure TsmPDF.ResolvePaperSize(APaperSize: TPDFPaperSize; ADPI, AWidth, AHeight: Integer;
-  out AWidthPx, AHeightPx: Integer);
+// Exact paper sizes in points (portrait).
+procedure PaperSizePoints(APaperSize: TPDFPaperSize; out AWidthPt, AHeightPt: Double);
 begin
   case APaperSize of
-    psLetter: begin AWidthPx := PointsToPixels(612.0,    ADPI); AHeightPx := PointsToPixels(792.0,    ADPI); end;
-    psLegal:  begin AWidthPx := PointsToPixels(612.0,    ADPI); AHeightPx := PointsToPixels(1008.0,   ADPI); end;
-    psA2:     begin AWidthPx := PointsToPixels(1190.55,  ADPI); AHeightPx := PointsToPixels(1683.78,  ADPI); end;
-    psA3:     begin AWidthPx := PointsToPixels(841.89,   ADPI); AHeightPx := PointsToPixels(1190.55,  ADPI); end;
-    psA4:     begin AWidthPx := PointsToPixels(595.28,   ADPI); AHeightPx := PointsToPixels(841.89,   ADPI); end;
-    psA5:     begin AWidthPx := PointsToPixels(419.53,   ADPI); AHeightPx := PointsToPixels(595.28,   ADPI); end;
-    psCustom:
-      begin
-        if (AWidth <= 0) or (AHeight <= 0) then
-          raise EPDFError.Create('psCustom requires positive width and height (pixels)');
-        AWidthPx  := AWidth;
-        AHeightPx := AHeight;
-      end;
+    psLetter: begin AWidthPt := 612.0;   AHeightPt := 792.0;   end;
+    psLegal:  begin AWidthPt := 612.0;   AHeightPt := 1008.0;  end;
+    psA2:     begin AWidthPt := 1190.55; AHeightPt := 1683.78; end;
+    psA3:     begin AWidthPt := 841.89;  AHeightPt := 1190.55; end;
+    psA4:     begin AWidthPt := 595.28;  AHeightPt := 841.89;  end;
+    psA5:     begin AWidthPt := 419.53;  AHeightPt := 595.28;  end;
   else
     raise EPDFError.Create('Unknown paper size');
   end;
 end;
 
-procedure TsmPDF.NewPage(const APaperSize: TPDFPaperSize; const AOrientation: TPDFOrientation;
-  const ADPI: Integer; const APaperColor: TColor;
-  const AWidth: Integer; const AHeight: Integer);
+procedure TsmPDF.StartPage(AWidthPt, AHeightPt: Double; ADPI: Integer; APaperColor: TColor);
 var
-  widthPx, heightPx, tmp: Integer;
   rgb: Cardinal;
   r, g, b: Double;
 begin
-  if ADPI <= 0 then
-    raise EPDFError.Create('NewPage: ADPI must be positive');
+  fDPI        := ADPI;
+  fWidthPt    := AWidthPt;
+  fHeightPt   := AHeightPt;
+  fPaperColor := APaperColor;
 
-  ResolvePaperSize(APaperSize, ADPI, AWidth, AHeight, widthPx, heightPx);
-
-  if AOrientation = poLandscape then
-  begin
-    tmp := widthPx;
-    widthPx := heightPx;
-    heightPx := tmp;
-  end;
-
-  fSize         := APaperSize;
-  fOrientation  := AOrientation;
-  fDPI          := ADPI;
-  fWidth        := widthPx;
-  fHeight       := heightPx;
-  fPaperColor   := APaperColor;
-
-  // Track the user-supplied AWidth/AHeight verbatim (pre-orientation-swap) so
-  // a follow-up parameter-less NewPage can re-create a psCustom page faithfully.
-  fCustomWidth  := AWidth;
-  fCustomHeight := AHeight;
-
-  fCurrentPage := TPDFPage.Create(widthPx, heightPx, ADPI);
+  fCurrentPage := TPDFPage.CreatePoints(AWidthPt, AHeightPt, ADPI);
   fPages.Add(fCurrentPage);
 
   // Paint the page background as a full-page filled rectangle. Skipped for
-  // clWhite so default-coloured pages stay byte-identical to the pre-feature
-  // output. Emitted before any user drawing so subsequent content sits on top.
+  // clWhite so default-coloured pages carry no extra operators. Emitted
+  // before any user drawing so subsequent content sits on top.
   // (RGB decomposition inlined because ColorToRGBFloats is declared later in
-  // this implementation section than NewPage.)
+  // this implementation section than StartPage.)
   if APaperColor <> clWhite then
   begin
     rgb := Cardinal(ColorToRGB(APaperColor));
@@ -515,10 +549,57 @@ begin
     b := ((rgb shr 16) and $FF) / 255.0;
     fCurrentPage.SaveState;
     fCurrentPage.SetFillRGB(r, g, b);
-    fCurrentPage.UserRectanglePath(0, 0, widthPx, heightPx);
+    fCurrentPage.UserRectanglePath(0, 0, PtToPx(AWidthPt), PtToPx(AHeightPt));
     fCurrentPage.FillEvenOdd;
     fCurrentPage.RestoreState;
   end;
+end;
+
+procedure TsmPDF.NewPage(const APaperSize: TPDFPaperSize; const AOrientation: TPDFOrientation;
+  const ADPI: Integer; const APaperColor: TColor;
+  const AWidth: Integer; const AHeight: Integer);
+var
+  widthPt, heightPt, tmp: Double;
+begin
+  if ADPI <= 0 then
+    raise EPDFError.Create('NewPage: ADPI must be positive');
+
+  if APaperSize = psCustom then
+  begin
+    if (AWidth <= 0) or (AHeight <= 0) then
+      raise EPDFError.Create('psCustom requires positive width and height (pixels)');
+    widthPt  := PixelsToPoints(AWidth, ADPI);
+    heightPt := PixelsToPoints(AHeight, ADPI);
+  end
+  else
+    PaperSizePoints(APaperSize, widthPt, heightPt);
+
+  if AOrientation = poLandscape then
+  begin
+    tmp := widthPt;
+    widthPt := heightPt;
+    heightPt := tmp;
+  end;
+
+  fSize        := APaperSize;
+  fOrientation := AOrientation;
+  StartPage(widthPt, heightPt, ADPI, APaperColor);
+end;
+
+procedure TsmPDF.NewPage(const AWidthPt, AHeightPt: Double; const ADPI: Integer;
+  const APaperColor: TColor);
+begin
+  if ADPI <= 0 then
+    raise EPDFError.Create('NewPage: ADPI must be positive');
+  if (AWidthPt <= 0) or (AHeightPt <= 0) then
+    raise EPDFError.Create('NewPage: page width and height must be positive');
+
+  fSize := psCustom;
+  if AWidthPt > AHeightPt then
+    fOrientation := poLandscape
+  else
+    fOrientation := poPortrait;
+  StartPage(AWidthPt, AHeightPt, ADPI, APaperColor);
 end;
 
 procedure TsmPDF.NewPage;
@@ -530,7 +611,7 @@ begin
   if fCurrentPage = nil then
     NewPage(psA4, poPortrait, 300)
   else
-    NewPage(fSize, fOrientation, fDPI, fPaperColor, fCustomWidth, fCustomHeight);
+    StartPage(fWidthPt, fHeightPt, fDPI, fPaperColor);
 end;
 
 procedure TsmPDF.EnsureCurrentPage;
@@ -698,7 +779,7 @@ end;
 
 function TsmPDF.Save(const AFileName: string; const AEmbedFonts: Boolean): Int64;
 begin
-  // AEmbedFonts is honoured starting Phase 4 (TTF embedding).
+  // AEmbedFonts is accepted for source compatibility; fonts are always embedded.
   Result := Save(AFileName);
 end;
 
@@ -760,11 +841,23 @@ begin
   end;
 end;
 
+// Apply only the pen, for stroke-only paths (lines, polylines).
+procedure ApplyStrokeState(APage: TPDFPage; APen: TPDFPen);
+var
+  r, g, b: Double;
+begin
+  ColorToRGBFloats(APen.Color, r, g, b);
+  APage.SetStrokeRGB(r, g, b);
+  APage.SetLineWidthPt(APen.Width);
+  ApplyPenDash(APage, APen.Style);
+  ApplyPenLineEnds(APage, APen.LineCap, APen.LineJoin);
+end;
+
 // Fill a rectangle using only the Brush, ignoring Pen. Used as the text
 // background ("highlighter") behind DrawText / DrawParagraph, mirroring the
 // way VCL TCanvas uses Brush during TextOut. No-op when the brush is clear.
 procedure FillRectWithBrush(APage: TPDFPage; ABrush: TPDFBrush;
-  X1, Y1, X2, Y2: Integer);
+  X1, Y1, X2, Y2: Double);
 var
   r, g, b: Double;
 begin
@@ -844,6 +937,44 @@ begin
     APage.ClosePath;
 end;
 
+// Floating-point twin of the above.
+procedure EmitPolygonPathF(APage: TPDFPage; const APointList: TPDFPointFList);
+var
+  i: Integer;
+  subStart, p: TPointF;
+  hasOpen, hasMovedAway: Boolean;
+begin
+  hasOpen      := False;
+  hasMovedAway := False;
+  for i := 0 to APointList.Count - 1 do
+  begin
+    p := APointList[i];
+    if not hasOpen then
+    begin
+      subStart     := p;
+      APage.UserMoveTo(p.X, p.Y);
+      hasOpen      := True;
+      hasMovedAway := False;
+    end
+    else if (p.X = subStart.X) and (p.Y = subStart.Y) then
+    begin
+      if hasMovedAway then
+      begin
+        APage.ClosePath;
+        hasOpen      := False;
+        hasMovedAway := False;
+      end;
+    end
+    else
+    begin
+      APage.UserLineTo(p.X, p.Y);
+      hasMovedAway := True;
+    end;
+  end;
+  if hasOpen then
+    APage.ClosePath;
+end;
+
 // ------------------------------------------------------------------
 // Phase 5 — image rendering
 // ------------------------------------------------------------------
@@ -874,12 +1005,12 @@ begin
     x1 + data.Width, y1 + data.Height);
 end;
 
-procedure TsmPDF.DrawPicture(const APicture: TPicture; ARect: TRect; AAlignment: TAlignment;
-  AStretch: Boolean);
+procedure TsmPDF.DrawPictureInRect(const APicture: TPicture; ALeft, ATop, ARight, ABottom: Double;
+  AAlignment: TAlignment; AStretch: Boolean);
 var
   key, res: string;
   data: TPDFImageData;
-  x1, y1, x2, y2: Integer;
+  x1, y1, x2, y2: Double;
 begin
   EnsureCurrentPage;
   if (APicture = nil) or (APicture.Graphic = nil) then Exit;
@@ -891,25 +1022,49 @@ begin
   if AStretch then
   begin
     // Fill the rectangle exactly; aspect ratio may distort.
-    x1 := ARect.Left;  y1 := ARect.Top;
-    x2 := ARect.Right; y2 := ARect.Bottom;
+    x1 := ALeft;  y1 := ATop;
+    x2 := ARight; y2 := ABottom;
   end
   else
   begin
     case AAlignment of
       taCenter:
-        x1 := ARect.Left + (ARect.Right - ARect.Left - data.Width) div 2;
+        x1 := ALeft + (ARight - ALeft - data.Width) / 2;
       taRightJustify:
-        x1 := ARect.Right - data.Width;
+        x1 := ARight - data.Width;
     else
-      x1 := ARect.Left;
+      x1 := ALeft;
     end;
-    y1 := ARect.Top;
+    y1 := ATop;
     x2 := x1 + data.Width;
     y2 := y1 + data.Height;
   end;
 
   fCurrentPage.DrawImageUserRect(res, x1, y1, x2, y2);
+end;
+
+procedure TsmPDF.DrawPicture(const APicture: TPicture; ARect: TRect; AAlignment: TAlignment;
+  AStretch: Boolean);
+var
+  left: Integer;
+begin
+  // Integer rects keep the 1.x whole-pixel centring.
+  left := ARect.Left;
+  if (not AStretch) and (AAlignment = taCenter) and (APicture <> nil) and (APicture.Graphic <> nil) then
+  begin
+    EnsureCurrentPage;
+    left := ARect.Left + (ARect.Right - ARect.Left - fImageData[GetOrAddImage(APicture)].Width) div 2;
+    DrawPictureInRect(APicture, left, ARect.Top, left + (ARect.Right - ARect.Left), ARect.Bottom,
+      taLeftJustify, False);
+  end
+  else
+    DrawPictureInRect(APicture, ARect.Left, ARect.Top, ARect.Right, ARect.Bottom, AAlignment, AStretch);
+end;
+
+procedure TsmPDF.DrawPicture(const APicture: TPicture; ARect: TRectF; AAlignment: TAlignment;
+  AStretch: Boolean);
+begin
+  DrawPictureInRect(APicture, ARect.Left, ARect.Top, ARect.Right, ARect.Bottom, AAlignment, AStretch);
 end;
 
 function TsmPDF.EmitImageObject(AWriter: TPDFWriter; const AData: TPDFImageData): TPDFObjectId;
@@ -1058,16 +1213,15 @@ begin
   end;
 end;
 
-procedure TsmPDF.EmitOneTextLine(const AText: string; X, Y: Integer; ASizePt: Double);
+procedure TsmPDF.EmitOneTextLine(const AText: string; X, Y: Double; ASizePt: Double);
 var
   resolved: TPDFResolvedFont;
   resName: string;
   ansi: AnsiString;
-  sizePt, ascentPt, ascentPx: Double;
-  baselineYPx: Integer;
+  sizePt, baselineYPx: Double;
   r, g, b, sr, sg, sb: Double;
-  textWidthPt, textWidthPx: Double;
-  underlineYPx: Integer;
+  textWidthPx: Double;
+  underlineYPx: Double;
   underlineThicknessPt: Double;
   strokeText: Boolean;
 begin
@@ -1079,9 +1233,7 @@ begin
 
   ansi := StringToWinAnsi(AText);
 
-  ascentPt    := FontAscentPt(resolved, sizePt);
-  ascentPx    := ascentPt * fDPI / 72.0;
-  baselineYPx := Y + Round(ascentPx);
+  baselineYPx := Y + PtToPx(FontAscentPt(resolved, sizePt));
 
   strokeText := fFont.StrokeStyle <> ssNone;
 
@@ -1105,14 +1257,13 @@ begin
 
   if fFont.Underline and (Length(ansi) > 0) then
   begin
-    textWidthPt := MeasureWidthPt(resolved, sizePt, ansi);
-    textWidthPx := textWidthPt * fDPI / 72.0;
+    textWidthPx := PtToPx(MeasureWidthPt(resolved, sizePt, ansi));
 
     underlineThicknessPt := 0.05 * sizePt;
     if underlineThicknessPt < 0.5 then underlineThicknessPt := 0.5;
 
     // Underline sits ~0.12em below the baseline (PDF underlinePosition convention).
-    underlineYPx := baselineYPx + Round(0.12 * sizePt * fDPI / 72.0);
+    underlineYPx := baselineYPx + PtToPx(0.12 * sizePt);
 
     fCurrentPage.SaveState;
     fCurrentPage.SetStrokeRGB(r, g, b);
@@ -1120,18 +1271,23 @@ begin
     fCurrentPage.SetDashPattern([], 0);
     fCurrentPage.SetLineCap(0);
     fCurrentPage.UserMoveTo(X, underlineYPx);
-    fCurrentPage.UserLineTo(X + Round(textWidthPx), underlineYPx);
+    fCurrentPage.UserLineTo(X + textWidthPx, underlineYPx);
     fCurrentPage.Stroke;
     fCurrentPage.RestoreState;
   end;
 end;
 
 procedure TsmPDF.DrawText(const AText: string; X, Y: Integer; AAngle: Double);
+begin
+  DrawText(AText, Double(X), Double(Y), AAngle);
+end;
+
+procedure TsmPDF.DrawText(const AText: string; X, Y: Double; AAngle: Double);
 var
-  ext: TSize;
+  extW, extH: Double;
   rotated: Boolean;
   thetaRad, cosT, sinT: Double;
-  pivotPt: TPDFPointF;
+  pivotX, pivotY: Double;
   cm_e, cm_f: Double;
 begin
   EnsureCurrentPage;
@@ -1146,23 +1302,24 @@ begin
     thetaRad := AAngle * Pi / 180.0;
     cosT := Cos(thetaRad);
     sinT := Sin(thetaRad);
-    pivotPt := PixelToPdfPoint(X, Y, fDPI, fCurrentPage.HeightPixels);
+    pivotX := PxToPt(X);
+    pivotY := fHeightPt - PxToPt(Y);
     // Affine that rotates by AAngle degrees CCW around the pivot in PDF coords.
     // PDF row-vector form [a b c d e f] = [cos, sin, -sin, cos, ex, ey] where:
     //   ex = px*(1 - cos) + py*sin
     //   ey = py*(1 - cos) - px*sin
-    cm_e := pivotPt.X * (1 - cosT) + pivotPt.Y * sinT;
-    cm_f := pivotPt.Y * (1 - cosT) - pivotPt.X * sinT;
+    cm_e := pivotX * (1 - cosT) + pivotY * sinT;
+    cm_f := pivotY * (1 - cosT) - pivotX * sinT;
     fCurrentPage.SaveState;
     fCurrentPage.ConcatMatrix(cosT, sinT, -sinT, cosT, cm_e, cm_f);
   end;
 
   if fBrush.Style = brushSolid then
   begin
-    ext := TextExtent(AText);
-    FillRectWithBrush(fCurrentPage, fBrush, X, Y, X + ext.cx, Y + ext.cy);
+    MeasureTextPx(AText, extW, extH);
+    FillRectWithBrush(fCurrentPage, fBrush, X, Y, X + extW, Y + extH);
   end;
-  EmitOneTextLine(AText, X, Y, fFont.Size);
+  EmitOneTextLine(AText, X, Y, EffectiveFontSize);
 
   if rotated then
     fCurrentPage.RestoreState;
@@ -1174,6 +1331,12 @@ begin
 end;
 
 procedure TsmPDF.DrawText(const AText: string; ARect: TRect; AAlignment: TAlignment);
+begin
+  DrawTextInRect(AText, ARect.Left, ARect.Top, ARect.Right, ARect.Bottom, AAlignment);
+end;
+
+procedure TsmPDF.DrawTextInRect(const AText: string; ALeft, ATop, ARight, ABottom: Double;
+  AAlignment: TAlignment);
 const
   REF_SIZE_PT = 100.0;  // arbitrary; only ratios matter
 var
@@ -1183,24 +1346,24 @@ var
   rectWidthPt, rectHeightPt: Double;
   sizePt: Double;
   textWidthPx, lineHeightPx: Double;
-  x, y: Integer;
+  x, y: Double;
 begin
   EnsureCurrentPage;
 
-  rectWidthPt  := (ARect.Right  - ARect.Left) * 72.0 / fDPI;
-  rectHeightPt := (ARect.Bottom - ARect.Top)  * 72.0 / fDPI;
+  rectWidthPt  := PxToPt(ARight - ALeft);
+  rectHeightPt := PxToPt(ABottom - ATop);
   if (rectWidthPt <= 0) or (rectHeightPt <= 0) then Exit;
 
   // VCL TextRect-style background: paint the whole rect (independent of text
   // length / alignment) so the fill stays even when AText is empty.
-  FillRectWithBrush(fCurrentPage, fBrush, ARect.Left, ARect.Top, ARect.Right, ARect.Bottom);
+  FillRectWithBrush(fCurrentPage, fBrush, ALeft, ATop, ARight, ABottom);
 
   if AText = '' then Exit;
 
   resolved := ResolveCurrentFont;
   ansi     := StringToWinAnsi(AText);
 
-  // Pick the largest font size that fits the text inside ARect on both axes
+  // Pick the largest font size that fits the text inside the rect on both axes
   // while preserving the font's natural width:height ratio.
   refWidthPt      := MeasureWidthPt(resolved, REF_SIZE_PT, ansi);
   refLineHeightPt := FontLineHeightPt(resolved, REF_SIZE_PT);
@@ -1210,78 +1373,85 @@ begin
                               rectHeightPt / refLineHeightPt);
   if sizePt <= 0 then Exit;
 
-  textWidthPx  := MeasureWidthPt(resolved, sizePt, ansi) * fDPI / 72.0;
-  lineHeightPx := FontLineHeightPt(resolved, sizePt)     * fDPI / 72.0;
+  textWidthPx  := PtToPx(MeasureWidthPt(resolved, sizePt, ansi));
+  lineHeightPx := PtToPx(FontLineHeightPt(resolved, sizePt));
 
   case AAlignment of
-    taCenter:       x := ARect.Left + Round((ARect.Right - ARect.Left - textWidthPx) / 2);
-    taRightJustify: x := ARect.Right - Round(textWidthPx);
+    taCenter:       x := ALeft + (ARight - ALeft - textWidthPx) / 2;
+    taRightJustify: x := ARight - textWidthPx;
   else
-    x := ARect.Left;
+    x := ALeft;
   end;
 
-  y := ARect.Top + Round((ARect.Bottom - ARect.Top - lineHeightPx) / 2);
-  if y < ARect.Top then y := ARect.Top;
+  y := ATop + (ABottom - ATop - lineHeightPx) / 2;
+  if y < ATop then y := ATop;
 
   EmitOneTextLine(AText, x, y, sizePt);
 end;
 
+function PaddingMultiplier(APadding: TPDFTextPadding): Double;
+begin
+  case APadding of
+    tpNone, tpTight: Result := 1.0;
+    tpSingle:        Result := 1.2;
+    tpDouble:        Result := 2.4;
+  else
+    Result := 1.2;
+  end;
+end;
+
 procedure TsmPDF.DrawParagraph(const AText: string; ARect: TRect; AAlignment: TAlignment;
   APadding: TPDFTextPadding);
+begin
+  DrawParagraphInRect(AText, ARect.Left, ARect.Top, ARect.Right, ARect.Bottom, AAlignment, APadding);
+end;
+
+procedure TsmPDF.DrawParagraphInRect(const AText: string; ALeft, ATop, ARight, ABottom: Double;
+  AAlignment: TAlignment; APadding: TPDFTextPadding);
 var
   font: TStandardFont;
-  sizePt, paddingMult, lineHeightPx, maxWidthPt: Double;
+  sizePt, lineHeightPx, maxWidthPt: Double;
   lines: TStringList;
   ansi: AnsiString;
-  i, lineX, lineY: Integer;
-  lineWidthPx: Double;
+  i: Integer;
+  lineX, lineY, lineWidthPx: Double;
 begin
   EnsureCurrentPage;
 
   // Single rect-sized background fill for the whole paragraph (not per-line).
-  if (ARect.Right > ARect.Left) and (ARect.Bottom > ARect.Top) then
-    FillRectWithBrush(fCurrentPage, fBrush, ARect.Left, ARect.Top, ARect.Right, ARect.Bottom);
+  if (ARight > ALeft) and (ABottom > ATop) then
+    FillRectWithBrush(fCurrentPage, fBrush, ALeft, ATop, ARight, ABottom);
 
   if AText = '' then Exit;
 
-  sizePt := fFont.Size;
-  if sizePt <= 0 then sizePt := 12;
+  sizePt := EffectiveFontSize;
 
   font := ResolveStandardFont(fFont.Name, fFont.Bold, fFont.Italics);
 
-  case APadding of
-    tpNone, tpTight: paddingMult := 1.0;
-    tpSingle:        paddingMult := 1.2;
-    tpDouble:        paddingMult := 2.4;
-  else
-    paddingMult := 1.2;
-  end;
-  lineHeightPx := paddingMult * sizePt * fDPI / 72.0;
-
-  maxWidthPt := (ARect.Right - ARect.Left) * 72.0 / fDPI;
+  lineHeightPx := PtToPx(PaddingMultiplier(APadding) * sizePt);
+  maxWidthPt   := PxToPt(ARight - ALeft);
 
   lines := WrapTextToLines(AText, font, sizePt, maxWidthPt);
   try
     for i := 0 to lines.Count - 1 do
     begin
       ansi        := StringToWinAnsi(lines[i]);
-      lineWidthPx := StandardFontTextWidth(font, sizePt, ansi) * fDPI / 72.0;
+      lineWidthPx := PtToPx(StandardFontTextWidth(font, sizePt, ansi));
 
       case AAlignment of
         taCenter:
-          lineX := ARect.Left + Round((ARect.Right - ARect.Left - lineWidthPx) / 2);
+          lineX := ALeft + (ARight - ALeft - lineWidthPx) / 2;
         taRightJustify:
-          lineX := ARect.Right - Round(lineWidthPx);
+          lineX := ARight - lineWidthPx;
       else
-        lineX := ARect.Left;
+        lineX := ALeft;
       end;
 
-      lineY := ARect.Top + Round(i * lineHeightPx);
-      // Stop if we'd drop below the rect (Phase 3 truncates rather than
-      // overflowing — caller can inspect rect height before calling for now).
-      if lineY > ARect.Bottom then Break;
+      lineY := ATop + i * lineHeightPx;
+      // Stop if we'd drop below the rect (truncates rather than overflowing).
+      if lineY > ABottom then Break;
 
-      EmitOneTextLine(lines[i], lineX, lineY, fFont.Size);
+      EmitOneTextLine(lines[i], lineX, lineY, sizePt);
     end;
   finally
     lines.Free;
@@ -1292,32 +1462,53 @@ end;
 // Text measurement
 // ------------------------------------------------------------------
 
-function TsmPDF.TextExtent(const AText: string): TSize;
+procedure TsmPDF.MeasureTextPx(const AText: string; out AWidthPx, AHeightPx: Double);
 var
   resolved: TPDFResolvedFont;
-  ansi: AnsiString;
-  sizePt, widthPt, lineHeightPt: Double;
+  sizePt, widthPt: Double;
 begin
   EnsureCurrentPage;
 
-  sizePt := fFont.Size;
-  if sizePt <= 0 then sizePt := 12;
-
-  resolved     := ResolveCurrentFont;
-  lineHeightPt := FontLineHeightPt(resolved, sizePt);
+  sizePt   := EffectiveFontSize;
+  resolved := ResolveCurrentFont;
 
   if AText = '' then
     widthPt := 0
   else
-  begin
-    ansi    := StringToWinAnsi(AText);
-    widthPt := MeasureWidthPt(resolved, sizePt, ansi);
-  end;
+    widthPt := MeasureWidthPt(resolved, sizePt, StringToWinAnsi(AText));
 
-  Result := TSize.Create(
-    Round(widthPt      * fDPI / 72.0),
-    Round(lineHeightPt * fDPI / 72.0)
-  );
+  AWidthPx  := PtToPx(widthPt);
+  AHeightPx := PtToPx(FontLineHeightPt(resolved, sizePt));
+end;
+
+function TsmPDF.TextExtentF(const AText: string): TSizeF;
+var
+  w, h: Double;
+begin
+  MeasureTextPx(AText, w, h);
+  Result := TSizeF.Create(w, h);
+end;
+
+function TsmPDF.TextWidthF(const AText: string): Double;
+var
+  h: Double;
+begin
+  MeasureTextPx(AText, Result, h);
+end;
+
+function TsmPDF.TextHeightF(const AText: string): Double;
+var
+  w: Double;
+begin
+  MeasureTextPx(AText, w, Result);
+end;
+
+function TsmPDF.TextExtent(const AText: string): TSize;
+var
+  w, h: Double;
+begin
+  MeasureTextPx(AText, w, h);
+  Result := TSize.Create(Round(w), Round(h));
 end;
 
 function TsmPDF.TextWidth(const AText: string): Integer;
@@ -1333,35 +1524,34 @@ end;
 function TsmPDF.MeasureParagraph(const AText: string; AMaxWidthPx: Integer;
   APadding: TPDFTextPadding): TSize;
 var
+  ext: TSizeF;
+begin
+  ext := MeasureParagraphF(AText, AMaxWidthPx, APadding);
+  Result := TSize.Create(Round(ext.cx), Round(ext.cy));
+end;
+
+function TsmPDF.MeasureParagraphF(const AText: string; AMaxWidthPx: Double;
+  APadding: TPDFTextPadding): TSizeF;
+var
   font: TStandardFont;
-  sizePt, paddingMult, lineHeightPx, maxWidthPt: Double;
+  sizePt, lineHeightPx, maxWidthPt: Double;
   lines: TStringList;
-  ansi: AnsiString;
   i: Integer;
   lineWidthPx, widestPx: Double;
 begin
   EnsureCurrentPage;
-  Result := TSize.Create(0, 0);
+  Result := TSizeF.Create(0, 0);
   if (AText = '') or (AMaxWidthPx <= 0) then Exit;
 
-  sizePt := fFont.Size;
-  if sizePt <= 0 then sizePt := 12;
+  sizePt := EffectiveFontSize;
 
   // Mirror DrawParagraph: word-wrap uses the standard-14 font corresponding to
   // the current Font.Name/Bold/Italics. TTF families fall back here too, so
   // measurements match what DrawParagraph will actually render.
   font := ResolveStandardFont(fFont.Name, fFont.Bold, fFont.Italics);
 
-  case APadding of
-    tpNone, tpTight: paddingMult := 1.0;
-    tpSingle:        paddingMult := 1.2;
-    tpDouble:        paddingMult := 2.4;
-  else
-    paddingMult := 1.2;
-  end;
-  lineHeightPx := paddingMult * sizePt * fDPI / 72.0;
-
-  maxWidthPt := AMaxWidthPx * 72.0 / fDPI;
+  lineHeightPx := PtToPx(PaddingMultiplier(APadding) * sizePt);
+  maxWidthPt   := PxToPt(AMaxWidthPx);
 
   lines := WrapTextToLines(AText, font, sizePt, maxWidthPt);
   try
@@ -1369,11 +1559,10 @@ begin
     widestPx := 0;
     for i := 0 to lines.Count - 1 do
     begin
-      ansi        := StringToWinAnsi(lines[i]);
-      lineWidthPx := StandardFontTextWidth(font, sizePt, ansi) * fDPI / 72.0;
+      lineWidthPx := PtToPx(StandardFontTextWidth(font, sizePt, StringToWinAnsi(lines[i])));
       if lineWidthPx > widestPx then widestPx := lineWidthPx;
     end;
-    Result := TSize.Create(Round(widestPx), Round(lines.Count * lineHeightPx));
+    Result := TSizeF.Create(widestPx, lines.Count * lineHeightPx);
   finally
     lines.Free;
   end;
@@ -1384,18 +1573,17 @@ end;
 // ------------------------------------------------------------------
 
 procedure TsmPDF.DrawLine(const x1, y1, x2, y2: Integer);
-var
-  r, g, b: Double;
+begin
+  DrawLine(Double(x1), Double(y1), Double(x2), Double(y2));
+end;
+
+procedure TsmPDF.DrawLine(const x1, y1, x2, y2: Double);
 begin
   EnsureCurrentPage;
   if fPen.Style = penNone then Exit;  // lines have no fill; nothing to draw
 
   fCurrentPage.SaveState;
-  ColorToRGBFloats(fPen.Color, r, g, b);
-  fCurrentPage.SetStrokeRGB(r, g, b);
-  fCurrentPage.SetLineWidthPt(fPen.Width);
-  ApplyPenDash(fCurrentPage, fPen.Style);
-  ApplyPenLineEnds(fCurrentPage, fPen.LineCap, fPen.LineJoin);
+  ApplyStrokeState(fCurrentPage, fPen);
   fCurrentPage.UserMoveTo(x1, y1);
   fCurrentPage.UserLineTo(x2, y2);
   fCurrentPage.Stroke;
@@ -1403,6 +1591,11 @@ begin
 end;
 
 procedure TsmPDF.DrawBox(const x1, y1, x2, y2: Integer);
+begin
+  DrawBox(Double(x1), Double(y1), Double(x2), Double(y2));
+end;
+
+procedure TsmPDF.DrawBox(const x1, y1, x2, y2: Double);
 begin
   EnsureCurrentPage;
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
@@ -1416,6 +1609,11 @@ end;
 
 procedure TsmPDF.DrawOval(const x1, y1, x2, y2: Integer);
 begin
+  DrawOval(Double(x1), Double(y1), Double(x2), Double(y2));
+end;
+
+procedure TsmPDF.DrawOval(const x1, y1, x2, y2: Double);
+begin
   EnsureCurrentPage;
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
@@ -1428,7 +1626,6 @@ end;
 
 procedure TsmPDF.DrawMultiLine(const APointList: TPDFPointList);
 var
-  r, g, b: Double;
   i: Integer;
 begin
   EnsureCurrentPage;
@@ -1436,11 +1633,24 @@ begin
   if fPen.Style = penNone then Exit;  // open polylines have no fill
 
   fCurrentPage.SaveState;
-  ColorToRGBFloats(fPen.Color, r, g, b);
-  fCurrentPage.SetStrokeRGB(r, g, b);
-  fCurrentPage.SetLineWidthPt(fPen.Width);
-  ApplyPenDash(fCurrentPage, fPen.Style);
-  ApplyPenLineEnds(fCurrentPage, fPen.LineCap, fPen.LineJoin);
+  ApplyStrokeState(fCurrentPage, fPen);
+  fCurrentPage.UserMoveTo(APointList[0].X, APointList[0].Y);
+  for i := 1 to APointList.Count - 1 do
+    fCurrentPage.UserLineTo(APointList[i].X, APointList[i].Y);
+  fCurrentPage.Stroke;
+  fCurrentPage.RestoreState;
+end;
+
+procedure TsmPDF.DrawMultiLine(const APointList: TPDFPointFList);
+var
+  i: Integer;
+begin
+  EnsureCurrentPage;
+  if APointList.Count < 2 then Exit;
+  if fPen.Style = penNone then Exit;
+
+  fCurrentPage.SaveState;
+  ApplyStrokeState(fCurrentPage, fPen);
   fCurrentPage.UserMoveTo(APointList[0].X, APointList[0].Y);
   for i := 1 to APointList.Count - 1 do
     fCurrentPage.UserLineTo(APointList[i].X, APointList[i].Y);
@@ -1461,6 +1671,19 @@ begin
   fCurrentPage.RestoreState;
 end;
 
+procedure TsmPDF.DrawPolygon(const APointList: TPDFPointFList);
+begin
+  EnsureCurrentPage;
+  if APointList.Count < 2 then Exit;
+  if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
+
+  fCurrentPage.SaveState;
+  ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
+  EmitPolygonPathF(fCurrentPage, APointList);
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, True);
+  fCurrentPage.RestoreState;
+end;
+
 procedure TsmPDF.DrawPolygon(const APointList: TPDFPointList; AClipRect: TRect);
 begin
   EnsureCurrentPage;
@@ -1471,6 +1694,20 @@ begin
   fCurrentPage.SetClipRect(AClipRect.Left, AClipRect.Top, AClipRect.Right, AClipRect.Bottom);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   EmitPolygonPath(fCurrentPage, APointList);
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, True);
+  fCurrentPage.RestoreState;
+end;
+
+procedure TsmPDF.DrawPolygon(const APointList: TPDFPointFList; AClipRect: TRectF);
+begin
+  EnsureCurrentPage;
+  if APointList.Count < 2 then Exit;
+  if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
+
+  fCurrentPage.SaveState;
+  fCurrentPage.SetClipRect(AClipRect.Left, AClipRect.Top, AClipRect.Right, AClipRect.Bottom);
+  ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
+  EmitPolygonPathF(fCurrentPage, APointList);
   PaintByPenAndBrush(fCurrentPage, fPen, fBrush, True);
   fCurrentPage.RestoreState;
 end;

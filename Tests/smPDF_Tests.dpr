@@ -18,7 +18,8 @@ uses
   Tests.PDF.Images in 'Source\Tests.PDF.Images.pas',
   Tests.PDF.PictureEmit in 'Source\Tests.PDF.PictureEmit.pas',
   Tests.PDF.Integration in 'Source\Tests.PDF.Integration.pas',
-  Tests.PDF.Compression in 'Source\Tests.PDF.Compression.pas';
+  Tests.PDF.Compression in 'Source\Tests.PDF.Compression.pas',
+  Tests.PDF.FloatCoords in 'Source\Tests.PDF.FloatCoords.pas';
 
 var
   results: TArray<TTestResult>;

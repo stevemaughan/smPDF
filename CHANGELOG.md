@@ -26,8 +26,31 @@ break source compatibility; they are marked **Breaking**.
   copy. Flate runs at zlib level 4 (about 4× faster than level 6 on map
   content, ~10% larger).
 
+- **Breaking: `Font.Size` is now `Double`.** Assignments compile unchanged;
+  code that passes `Font.Size` where an `Integer` is expected needs a
+  `Round`. Fractional sizes are written verbatim (`/F1 7.35 Tf`).
+- **Breaking (output): the Y flip is now `H − Y`, not `(H − 1) − Y`.** Everything
+  on a page moves up by one pixel, so pixel `Y = 0` is the top edge of the page
+  and `Y = Height` is the bottom edge.
+- **Breaking (output): the MediaBox uses exact point sizes.** A4 is
+  `595.28 × 841.89` at any DPI; previously it was rounded through whole pixels
+  (A4 at 300 DPI came out as `595.2 × 841.92`).
+- **Breaking (output): text is no longer snapped to whole pixels.** Baselines,
+  underline ends, and aligned/centred positions inside `DrawText(Rect)` and
+  `DrawParagraph` keep their fractional pixel values.
+- Paper-size and custom pages keep their exact point size across the
+  parameterless `NewPage`.
+
 ### Added
 
+- `NewPage(AWidthPt, AHeightPt: Double; ADPI = 72; APaperColor = clWhite)` —
+  page size in points, used exactly for the MediaBox. At 72 DPI one drawing
+  pixel is one point, so callers can work in points directly.
+- `Double` overloads: `DrawLine`, `DrawBox`, `DrawOval`, `DrawText(s, X, Y, Angle)`,
+  `DrawPicture(Picture, TRectF, …)`, and `TPDFPointFList = TList<TPointF>`
+  overloads of `DrawMultiLine` and `DrawPolygon` (including the clip-rect form).
+- `TextWidthF`, `TextHeightF`, `TextExtentF` — unrounded measurements.
+- `WidthPt`, `HeightPt` — the current page size in points.
 - `Tests/Bench/smPDF_Bench.dpr` — throughput benchmark (1M polygon vertices,
   2,000 outlined labels, A0 at 72 DPI).
 - `Save(AStream: TStream)` overload — writes the PDF at the stream's current

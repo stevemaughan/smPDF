@@ -8,9 +8,10 @@ uses
 type
   TPDFPage = class
   strict private
-    fWidthPixels:   Integer;
-    fHeightPixels:  Integer;
+    fWidthPoints:   Double;
+    fHeightPoints:  Double;
     fDpi:           Integer;
+    fScale:         Double;                       // points per pixel = 72 / DPI
     fContent:       TPDFByteBuffer;
     fFontMap:       TDictionary<string, string>;  // PDF font name -> page-local resource name (F1, F2, ...)
     fFontOrder:     TList<string>;                // insertion order for stable iteration
@@ -19,9 +20,15 @@ type
 
     procedure WriteRaw(const AStr: string);
     procedure WriteOp(const AOperator: string; const AOperands: array of Double);
-    function  ToPdfPoint(XPx, YPx: Integer): TPDFPointF;
+    function  PdfX(XPx: Double): Double; inline;
+    function  PdfY(YPx: Double): Double; inline;
+    function  GetWidthPixels: Integer;
+    function  GetHeightPixels: Integer;
   public
+    // Page size in pixels at ADpi (the 1.x constructor).
     constructor Create(AWidthPixels, AHeightPixels, ADpi: Integer);
+    // Page size in points, exactly; ADpi only sets the pixel unit for drawing.
+    constructor CreatePoints(AWidthPoints, AHeightPoints: Double; ADpi: Integer);
     destructor  Destroy; override;
 
     function WidthPoints: Double;
@@ -50,7 +57,7 @@ type
     // Draw an already-registered image at the given user-pixel rectangle.
     // Internally emits "q  W 0 0 H X Y cm  /ImN Do  Q" using PDF coords.
     procedure DrawImageUserRect(const AResName: string;
-      AX1Px, AY1Px, AX2Px, AY2Px: Integer);
+      AX1Px, AY1Px, AX2Px, AY2Px: Double);
 
     // ---------- Graphics state ----------
     procedure SaveState;
@@ -66,36 +73,39 @@ type
     procedure ConcatMatrix(A, B, C, D, E, F: Double);
 
     // ---------- Path construction (user pixel coords, top-left origin, Y down) ----------
-    procedure UserMoveTo(XPx, YPx: Integer);
-    procedure UserLineTo(XPx, YPx: Integer);
-    procedure UserRectanglePath(X1Px, Y1Px, X2Px, Y2Px: Integer);
-    procedure UserOvalPath(X1Px, Y1Px, X2Px, Y2Px: Integer);
+    procedure UserMoveTo(XPx, YPx: Double);
+    procedure UserLineTo(XPx, YPx: Double);
+    procedure UserCurveTo(X1Px, Y1Px, X2Px, Y2Px, X3Px, Y3Px: Double);
+    procedure UserRectanglePath(X1Px, Y1Px, X2Px, Y2Px: Double);
+    procedure UserOvalPath(X1Px, Y1Px, X2Px, Y2Px: Double);
     procedure ClosePath;
 
     // ---------- Painting ----------
     procedure Stroke;
     procedure FillEvenOdd;
+    procedure FillNonZero;
     procedure FillAndStrokeEvenOdd;
+    procedure FillAndStrokeNonZero;
     procedure DiscardPath;
 
     // ---------- Clipping ----------
     // Constructs a rectangle path in user coords and uses it as the current
     // clipping path with the even-odd rule, then discards (n) so nothing is painted.
-    procedure SetClipRect(X1Px, Y1Px, X2Px, Y2Px: Integer);
+    procedure SetClipRect(X1Px, Y1Px, X2Px, Y2Px: Double);
 
     // ---------- Text ----------
     procedure BeginText;                                            // BT
     procedure EndText;                                              // ET
     procedure SetTextFont(const AResourceName: string;
       ASizePoints: Double);                                         // /F1 12 Tf
-    procedure SetTextMatrixUserBaseline(XPx, YPxBaseline: Integer); // 1 0 0 1 X Y Tm
+    procedure SetTextMatrixUserBaseline(XPx, YPxBaseline: Double);  // 1 0 0 1 X Y Tm
     procedure SetTextRenderingMode(AMode: Integer);                 // 0=fill, 1=stroke, 2=fill+stroke, 3=invisible
     procedure ShowTextAnsi(const AAnsiBytes: AnsiString);           // (...) Tj — bytes already WinAnsi
 
     function ContentStreamSize: Integer;
 
-    property WidthPixels:   Integer read fWidthPixels;
-    property HeightPixels:  Integer read fHeightPixels;
+    property WidthPixels:   Integer read GetWidthPixels;
+    property HeightPixels:  Integer read GetHeightPixels;
     property Dpi:           Integer read fDpi;
   end;
 
@@ -106,10 +116,16 @@ uses
 
 constructor TPDFPage.Create(AWidthPixels, AHeightPixels, ADpi: Integer);
 begin
+  CreatePoints(PixelsToPoints(AWidthPixels, ADpi), PixelsToPoints(AHeightPixels, ADpi), ADpi);
+end;
+
+constructor TPDFPage.CreatePoints(AWidthPoints, AHeightPoints: Double; ADpi: Integer);
+begin
   inherited Create;
-  fWidthPixels   := AWidthPixels;
-  fHeightPixels  := AHeightPixels;
+  fWidthPoints   := AWidthPoints;
+  fHeightPoints  := AHeightPoints;
   fDpi           := ADpi;
+  fScale         := POINTS_PER_INCH / ADpi;
   fContent       := TPDFByteBuffer.Create;
   fFontMap       := TDictionary<string, string>.Create;
   fFontOrder     := TList<string>.Create;
@@ -125,6 +141,26 @@ begin
   fFontMap.Free;
   fContent.Free;
   inherited;
+end;
+
+function TPDFPage.PdfX(XPx: Double): Double;
+begin
+  Result := XPx * fScale;
+end;
+
+function TPDFPage.PdfY(YPx: Double): Double;
+begin
+  Result := fHeightPoints - YPx * fScale;
+end;
+
+function TPDFPage.GetWidthPixels: Integer;
+begin
+  Result := PointsToPixels(fWidthPoints, fDpi);
+end;
+
+function TPDFPage.GetHeightPixels: Integer;
+begin
+  Result := PointsToPixels(fHeightPoints, fDpi);
 end;
 
 function TPDFPage.UseFont(const APdfFontName: string): string;
@@ -156,18 +192,14 @@ begin
 end;
 
 procedure TPDFPage.DrawImageUserRect(const AResName: string;
-  AX1Px, AY1Px, AX2Px, AY2Px: Integer);
+  AX1Px, AY1Px, AX2Px, AY2Px: Double);
 var
-  pTL, pBR: TPDFPointF;
   llX, llY, w, h: Double;
 begin
-  pTL := ToPdfPoint(AX1Px, AY1Px);
-  pBR := ToPdfPoint(AX2Px, AY2Px);
-
-  llX := pTL.X;
-  llY := pBR.Y;            // bottom-left in PDF coords
-  w   := pBR.X - pTL.X;
-  h   := pTL.Y - pBR.Y;
+  llX := PdfX(AX1Px);
+  llY := PdfY(AY2Px);            // bottom-left in PDF coords
+  w   := PdfX(AX2Px) - llX;
+  h   := PdfY(AY1Px) - llY;
 
   SaveState;
   // PDF cm: a b c d e f -> [a b 0; c d 0; e f 1] applied to image's unit square
@@ -178,12 +210,12 @@ end;
 
 function TPDFPage.WidthPoints: Double;
 begin
-  Result := PixelsToPoints(fWidthPixels, fDpi);
+  Result := fWidthPoints;
 end;
 
 function TPDFPage.HeightPoints: Double;
 begin
-  Result := PixelsToPoints(fHeightPixels, fDpi);
+  Result := fHeightPoints;
 end;
 
 function TPDFPage.ContentStreamSize: Integer;
@@ -207,11 +239,6 @@ begin
   end;
   fContent.AppendAscii(AOperator);
   fContent.AppendByte(10);
-end;
-
-function TPDFPage.ToPdfPoint(XPx, YPx: Integer): TPDFPointF;
-begin
-  Result := PixelToPdfPoint(XPx, YPx, fDpi, fHeightPixels);
 end;
 
 // ---------- Graphics state ----------
@@ -275,52 +302,42 @@ end;
 
 // ---------- Path construction ----------
 
-procedure TPDFPage.UserMoveTo(XPx, YPx: Integer);
-var
-  p: TPDFPointF;
+procedure TPDFPage.UserMoveTo(XPx, YPx: Double);
 begin
-  p := ToPdfPoint(XPx, YPx);
-  fContent.AppendPointOp(p.X, p.Y, 'm');
+  fContent.AppendPointOp(PdfX(XPx), PdfY(YPx), 'm');
 end;
 
-procedure TPDFPage.UserLineTo(XPx, YPx: Integer);
-var
-  p: TPDFPointF;
+procedure TPDFPage.UserLineTo(XPx, YPx: Double);
 begin
-  p := ToPdfPoint(XPx, YPx);
-  fContent.AppendPointOp(p.X, p.Y, 'l');
+  fContent.AppendPointOp(PdfX(XPx), PdfY(YPx), 'l');
 end;
 
-procedure TPDFPage.UserRectanglePath(X1Px, Y1Px, X2Px, Y2Px: Integer);
-var
-  p1, p2: TPDFPointF;
-  llX, llY, w, h: Double;
+procedure TPDFPage.UserCurveTo(X1Px, Y1Px, X2Px, Y2Px, X3Px, Y3Px: Double);
 begin
-  p1 := ToPdfPoint(X1Px, Y1Px);
-  p2 := ToPdfPoint(X2Px, Y2Px);
-
-  llX := Min(p1.X, p2.X);
-  llY := Min(p1.Y, p2.Y);
-  w   := Abs(p2.X - p1.X);
-  h   := Abs(p1.Y - p2.Y);
-
-  WriteOp('re', [llX, llY, w, h]);
+  WriteOp('c', [PdfX(X1Px), PdfY(Y1Px), PdfX(X2Px), PdfY(Y2Px), PdfX(X3Px), PdfY(Y3Px)]);
 end;
 
-procedure TPDFPage.UserOvalPath(X1Px, Y1Px, X2Px, Y2Px: Integer);
+procedure TPDFPage.UserRectanglePath(X1Px, Y1Px, X2Px, Y2Px: Double);
+var
+  x1, y1, x2, y2: Double;
+begin
+  x1 := PdfX(X1Px);
+  y1 := PdfY(Y1Px);
+  x2 := PdfX(X2Px);
+  y2 := PdfY(Y2Px);
+  WriteOp('re', [Min(x1, x2), Min(y1, y2), Abs(x2 - x1), Abs(y1 - y2)]);
+end;
+
+procedure TPDFPage.UserOvalPath(X1Px, Y1Px, X2Px, Y2Px: Double);
 const
   KAPPA = 0.5522847498307933;  // 4*(sqrt(2)-1)/3 — best-fit cubic for a quarter circle
 var
-  pTL, pBR: TPDFPointF;
   cx, cy, rx, ry, kx, ky: Double;
 begin
-  pTL := ToPdfPoint(X1Px, Y1Px);
-  pBR := ToPdfPoint(X2Px, Y2Px);
-
-  cx := (pTL.X + pBR.X) / 2.0;
-  cy := (pTL.Y + pBR.Y) / 2.0;
-  rx := Abs(pBR.X - pTL.X) / 2.0;
-  ry := Abs(pTL.Y - pBR.Y) / 2.0;
+  cx := (PdfX(X1Px) + PdfX(X2Px)) / 2.0;
+  cy := (PdfY(Y1Px) + PdfY(Y2Px)) / 2.0;
+  rx := Abs(PdfX(X2Px) - PdfX(X1Px)) / 2.0;
+  ry := Abs(PdfY(Y1Px) - PdfY(Y2Px)) / 2.0;
   kx := KAPPA * rx;
   ky := KAPPA * ry;
 
@@ -350,9 +367,19 @@ begin
   WriteRaw('f*'#10);
 end;
 
+procedure TPDFPage.FillNonZero;
+begin
+  WriteRaw('f'#10);
+end;
+
 procedure TPDFPage.FillAndStrokeEvenOdd;
 begin
   WriteRaw('B*'#10);
+end;
+
+procedure TPDFPage.FillAndStrokeNonZero;
+begin
+  WriteRaw('B'#10);
 end;
 
 procedure TPDFPage.DiscardPath;
@@ -362,7 +389,7 @@ end;
 
 // ---------- Clipping ----------
 
-procedure TPDFPage.SetClipRect(X1Px, Y1Px, X2Px, Y2Px: Integer);
+procedure TPDFPage.SetClipRect(X1Px, Y1Px, X2Px, Y2Px: Double);
 begin
   UserRectanglePath(X1Px, Y1Px, X2Px, Y2Px);
   WriteRaw('W*'#10);  // intersect with current clip path, even-odd rule
@@ -390,12 +417,9 @@ begin
   fContent.AppendAscii(' Tf'#10);
 end;
 
-procedure TPDFPage.SetTextMatrixUserBaseline(XPx, YPxBaseline: Integer);
-var
-  p: TPDFPointF;
+procedure TPDFPage.SetTextMatrixUserBaseline(XPx, YPxBaseline: Double);
 begin
-  p := ToPdfPoint(XPx, YPxBaseline);
-  WriteOp('Tm', [1.0, 0.0, 0.0, 1.0, p.X, p.Y]);
+  WriteOp('Tm', [1.0, 0.0, 0.0, 1.0, PdfX(XPx), PdfY(YPxBaseline)]);
 end;
 
 procedure TPDFPage.SetTextRenderingMode(AMode: Integer);
