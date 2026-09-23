@@ -129,65 +129,29 @@ begin
   Result.OffsetY := marginT + (drawH - spanY * Result.Scale) / 2 + AB.MaxMercY * Result.Scale;
 end;
 
-function ProjectPoint(const P: TProjector; ALon, ALat: Double): TPoint;
+function ProjectPoint(const P: TProjector; ALon, ALat: Double): TPointF;
 begin
-  Result.X := Round(P.OffsetX + ALon            * P.Scale);
-  Result.Y := Round(P.OffsetY - MercatorY(ALat) * P.Scale);
+  Result.X := P.OffsetX + ALon            * P.Scale;
+  Result.Y := P.OffsetY - MercatorY(ALat) * P.Scale;
 end;
 
-procedure AppendRing(ring: TJSONArray; const P: TProjector; pts: TPDFPointList);
+// Append one GeoJSON ring as an explicit part of a poly-polygon. The closing
+// vertex (a repeat of the first) is dropped; DrawPolyPolygon closes each part.
+procedure AppendRing(ring: TJSONArray; const P: TProjector;
+  pts: TList<TPointF>; counts: TList<Integer>);
 var
-  i, ringStart: Integer;
+  i, n: Integer;
   pt: TJSONArray;
-  lon, lat: Double;
-  q, prev, startPx: TPoint;
-  isLast: Boolean;
 begin
-  if ring.Count < 3 then Exit;
-  ringStart := pts.Count;
-
-  // First vertex — defines the subpath's start.
-  pt := ring.Items[0] as TJSONArray;
-  lon := (pt.Items[0] as TJSONNumber).AsDouble;
-  lat := (pt.Items[1] as TJSONNumber).AsDouble;
-  startPx := ProjectPoint(P, lon, lat);
-  pts.Add(startPx);
-
-  for i := 1 to ring.Count - 1 do
+  n := ring.Count;
+  if n < 4 then Exit;
+  for i := 0 to n - 2 do
   begin
-    pt  := ring.Items[i] as TJSONArray;
-    lon := (pt.Items[0] as TJSONNumber).AsDouble;
-    lat := (pt.Items[1] as TJSONNumber).AsDouble;
-    q   := ProjectPoint(P, lon, lat);
-
-    isLast := i = ring.Count - 1;
-
-    // smPDF closes a subpath whenever a vertex equals the subpath start.
-    // A non-final interior vertex that projects to the start pixel would
-    // close the ring early, causing the rest of the ring to start a new
-    // subpath at some other pixel and the real closing vertex to become
-    // a stray lineTo back to the start — visible as a "fan" of strokes
-    // emanating from the start pixel. Shift such collisions by 1 px so
-    // only the final vertex matches the start.
-    if not isLast and (q.X = startPx.X) and (q.Y = startPx.Y) then
-      q.X := q.X + 1;
-
-    prev := pts[pts.Count - 1];
-    if (q.X = prev.X) and (q.Y = prev.Y) then Continue;
-
-    pts.Add(q);
+    pt := ring.Items[i] as TJSONArray;
+    pts.Add(ProjectPoint(P, (pt.Items[0] as TJSONNumber).AsDouble,
+                            (pt.Items[1] as TJSONNumber).AsDouble));
   end;
-
-  // Force close: if the source's last vertex didn't survive dedup as the
-  // ring start, append the start so smPDF's duplicate-of-start rule fires.
-  prev := pts[pts.Count - 1];
-  if (prev.X <> startPx.X) or (prev.Y <> startPx.Y) then
-    pts.Add(startPx);
-
-  // Drop rings that collapsed below 3 distinct pixels — they can't render
-  // meaningfully and would leak into the next ring's subpath.
-  if (pts.Count - ringStart) < 3 then
-    pts.Count := ringStart;
+  counts.Add(n - 1);
 end;
 
 procedure DrawFeature(pdf: TsmPDF; feature: TJSONObject; const P: TProjector);
@@ -198,7 +162,8 @@ var
   fillColor, strokeColor: TColor;
   coords, poly: TJSONArray;
   i, j: Integer;
-  pts: TPDFPointList;
+  pts: TList<TPointF>;
+  counts: TList<Integer>;
   v: TJSONValue;
 begin
   geom  := feature.GetValue('geometry')   as TJSONObject;
@@ -227,12 +192,13 @@ begin
   gType  := (geom.GetValue('type')        as TJSONString).Value;
   coords :=  geom.GetValue('coordinates') as TJSONArray;
 
-  pts := TPDFPointList.Create;
+  pts    := TList<TPointF>.Create;
+  counts := TList<Integer>.Create;
   try
     if gType = 'Polygon' then
     begin
       for i := 0 to coords.Count - 1 do
-        AppendRing(coords.Items[i] as TJSONArray, P, pts);
+        AppendRing(coords.Items[i] as TJSONArray, P, pts, counts);
     end
     else if gType = 'MultiPolygon' then
     begin
@@ -240,13 +206,14 @@ begin
       begin
         poly := coords.Items[i] as TJSONArray;
         for j := 0 to poly.Count - 1 do
-          AppendRing(poly.Items[j] as TJSONArray, P, pts);
+          AppendRing(poly.Items[j] as TJSONArray, P, pts, counts);
       end;
     end;
 
-    if pts.Count >= 3 then
-      pdf.DrawPolygon(pts);
+    if counts.Count > 0 then
+      pdf.DrawPolyPolygon(pts.ToArray, counts.ToArray, frEvenOdd);
   finally
+    counts.Free;
     pts.Free;
   end;
 end;

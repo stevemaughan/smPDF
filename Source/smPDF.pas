@@ -46,6 +46,8 @@ type
 
   TPDFTextPadding = (tpNone, tpTight, tpSingle, tpDouble);
 
+  TPDFFillRule = (frEvenOdd, frNonZero);
+
   TPDFLineCap  = (lcButt, lcRound, lcSquare);
   TPDFLineJoin = (ljMiter, ljRound, ljBevel);
 
@@ -217,6 +219,18 @@ type
     // the rect is hidden by a PDF clip path; coordinates are not modified.
     procedure DrawPolygon(const APointList: TPDFPointList; AClipRect: TRect); overload;
     procedure DrawPolygon(const APointList: TPDFPointFList; AClipRect: TRectF); overload;
+
+    // Rings are given explicitly: ACounts[i] points of APoints form part i,
+    // closed with h. Parts with fewer than 2 points are skipped; the counts
+    // must not add up to more than Length(APoints). Open arrays, so existing
+    // buffers can be passed without copying.
+    procedure DrawPolyPolygon(const APoints: array of TPointF; const ACounts: array of Integer;
+      AFillRule: TPDFFillRule = frEvenOdd); overload;
+    procedure DrawPolyPolygon(const APoints: array of TPoint; const ACounts: array of Integer;
+      AFillRule: TPDFFillRule = frEvenOdd); overload;
+    // Strokes the first ACount points (all of them when ACount = -1) as one
+    // open path with the current Pen.
+    procedure DrawPolyline(const APoints: array of TPointF; ACount: Integer = -1); overload;
 
     procedure DrawPicture(const APicture: TPicture; ARect: TRect;
       AAlignment: TAlignment = taLeftJustify; AStretch: Boolean = False); overload;
@@ -871,7 +885,8 @@ begin
 end;
 
 // Pick the right paint operator for the current pen + brush combination.
-procedure PaintByPenAndBrush(APage: TPDFPage; APen: TPDFPen; ABrush: TPDFBrush; AUseEvenOdd: Boolean);
+procedure PaintByPenAndBrush(APage: TPDFPage; APen: TPDFPen; ABrush: TPDFBrush;
+  AFillRule: TPDFFillRule = frEvenOdd);
 var
   doStroke, doFill: Boolean;
 begin
@@ -879,15 +894,35 @@ begin
   doFill   := ABrush.Style = brushSolid;
   if doFill and doStroke then
   begin
-    if AUseEvenOdd then APage.FillAndStrokeEvenOdd
-    else APage.FillAndStrokeEvenOdd;  // (Phase 2 only emits even-odd; non-zero added later if needed)
+    if AFillRule = frEvenOdd then APage.FillAndStrokeEvenOdd
+    else APage.FillAndStrokeNonZero;
   end
   else if doFill then
-    APage.FillEvenOdd
+  begin
+    if AFillRule = frEvenOdd then APage.FillEvenOdd
+    else APage.FillNonZero;
+  end
   else if doStroke then
     APage.Stroke
   else
     APage.DiscardPath;
+end;
+
+procedure CheckPartCounts(const ACounts: array of Integer; APointCount: Integer);
+var
+  i: Integer;
+  total: Int64;
+begin
+  total := 0;
+  for i := 0 to High(ACounts) do
+  begin
+    if ACounts[i] < 0 then
+      raise EPDFError.CreateFmt('DrawPolyPolygon: part %d has a negative point count', [i]);
+    Inc(total, ACounts[i]);
+  end;
+  if total > APointCount then
+    raise EPDFError.CreateFmt(
+      'DrawPolyPolygon: part counts add up to %d but only %d points were given', [total, APointCount]);
 end;
 
 // Walk a polygon point list, emitting a path with subpaths split on closure
@@ -1049,7 +1084,6 @@ var
   left: Integer;
 begin
   // Integer rects keep the 1.x whole-pixel centring.
-  left := ARect.Left;
   if (not AStretch) and (AAlignment = taCenter) and (APicture <> nil) and (APicture.Graphic <> nil) then
   begin
     EnsureCurrentPage;
@@ -1603,7 +1637,7 @@ begin
   fCurrentPage.SaveState;
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   fCurrentPage.UserRectanglePath(x1, y1, x2, y2);
-  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, False);
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
   fCurrentPage.RestoreState;
 end;
 
@@ -1620,7 +1654,7 @@ begin
   fCurrentPage.SaveState;
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   fCurrentPage.UserOvalPath(x1, y1, x2, y2);
-  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, False);
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
   fCurrentPage.RestoreState;
 end;
 
@@ -1667,7 +1701,7 @@ begin
   fCurrentPage.SaveState;
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   EmitPolygonPath(fCurrentPage, APointList);
-  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, True);
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
   fCurrentPage.RestoreState;
 end;
 
@@ -1680,7 +1714,7 @@ begin
   fCurrentPage.SaveState;
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   EmitPolygonPathF(fCurrentPage, APointList);
-  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, True);
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
   fCurrentPage.RestoreState;
 end;
 
@@ -1694,7 +1728,7 @@ begin
   fCurrentPage.SetClipRect(AClipRect.Left, AClipRect.Top, AClipRect.Right, AClipRect.Bottom);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   EmitPolygonPath(fCurrentPage, APointList);
-  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, True);
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
   fCurrentPage.RestoreState;
 end;
 
@@ -1708,7 +1742,89 @@ begin
   fCurrentPage.SetClipRect(AClipRect.Left, AClipRect.Top, AClipRect.Right, AClipRect.Bottom);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   EmitPolygonPathF(fCurrentPage, APointList);
-  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, True);
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
+  fCurrentPage.RestoreState;
+end;
+
+procedure TsmPDF.DrawPolyPolygon(const APoints: array of TPointF; const ACounts: array of Integer;
+  AFillRule: TPDFFillRule);
+var
+  part, i, first, n: Integer;
+begin
+  EnsureCurrentPage;
+  CheckPartCounts(ACounts, Length(APoints));
+  if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
+
+  fCurrentPage.SaveState;
+  ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
+  first := 0;
+  for part := 0 to High(ACounts) do
+  begin
+    n := ACounts[part];
+    if n >= 2 then
+    begin
+      fCurrentPage.UserMoveTo(APoints[first].X, APoints[first].Y);
+      for i := first + 1 to first + n - 1 do
+        fCurrentPage.UserLineTo(APoints[i].X, APoints[i].Y);
+      fCurrentPage.ClosePath;
+    end;
+    Inc(first, n);
+  end;
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, AFillRule);
+  fCurrentPage.RestoreState;
+end;
+
+procedure TsmPDF.DrawPolyPolygon(const APoints: array of TPoint; const ACounts: array of Integer;
+  AFillRule: TPDFFillRule);
+var
+  part, i, first, n: Integer;
+begin
+  EnsureCurrentPage;
+  CheckPartCounts(ACounts, Length(APoints));
+  if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
+
+  fCurrentPage.SaveState;
+  ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
+  first := 0;
+  for part := 0 to High(ACounts) do
+  begin
+    n := ACounts[part];
+    if n >= 2 then
+    begin
+      fCurrentPage.UserMoveTo(APoints[first].X, APoints[first].Y);
+      for i := first + 1 to first + n - 1 do
+        fCurrentPage.UserLineTo(APoints[i].X, APoints[i].Y);
+      fCurrentPage.ClosePath;
+    end;
+    Inc(first, n);
+  end;
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush, AFillRule);
+  fCurrentPage.RestoreState;
+end;
+
+procedure TsmPDF.DrawPolyline(const APoints: array of TPointF; ACount: Integer);
+var
+  i, n: Integer;
+begin
+  EnsureCurrentPage;
+  if ACount < 0 then
+    n := Length(APoints)
+  else
+  begin
+    if ACount > Length(APoints) then
+      raise EPDFError.CreateFmt('DrawPolyline: count %d exceeds the %d points given',
+        [ACount, Length(APoints)]);
+    n := ACount;
+  end;
+  if n < 2 then Exit;
+  if fPen.Style = penNone then Exit;
+
+  fCurrentPage.SaveState;
+  ApplyStrokeState(fCurrentPage, fPen);
+  fCurrentPage.UserMoveTo(APoints[0].X, APoints[0].Y);
+  for i := 1 to n - 1 do
+    fCurrentPage.UserLineTo(APoints[i].X, APoints[i].Y);
+  fCurrentPage.Stroke;
   fCurrentPage.RestoreState;
 end;
 

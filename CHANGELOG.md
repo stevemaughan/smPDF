@@ -50,6 +50,11 @@ break source compatibility; they are marked **Breaking**.
   `DrawPicture(Picture, TRectF, …)`, and `TPDFPointFList = TList<TPointF>`
   overloads of `DrawMultiLine` and `DrawPolygon` (including the clip-rect form).
 - `TextWidthF`, `TextHeightF`, `TextExtentF` — unrounded measurements.
+- `DrawPolyPolygon(Points, Counts, FillRule)` (`TPointF` and `TPoint` open
+  arrays) — rings are given by explicit counts, so a ring that passes through
+  its own start point is no longer split. `DrawPolyline(Points, Count)` strokes
+  an open path. `TPDFFillRule = (frEvenOdd, frNonZero)`; non-zero fills emit
+  `f` / `B`. The Map demo now uses `DrawPolyPolygon` with unrounded coordinates.
 - `WidthPt`, `HeightPt` — the current page size in points.
 - `Tests/Bench/smPDF_Bench.dpr` — throughput benchmark (1M polygon vertices,
   2,000 outlined labels, A0 at 72 DPI).
