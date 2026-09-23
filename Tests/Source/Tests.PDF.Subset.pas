@@ -167,6 +167,8 @@ begin
   try
     // Find an accented letter that Arial builds as a composite glyph.
     comps := nil;
+    gid := 0;
+    ch := #0;
     for ch in [#$00E9, #$00C5, #$00F1, #$00FC, #$00E0] do
     begin
       gid := font.GlyphIndex(Ord(ch));

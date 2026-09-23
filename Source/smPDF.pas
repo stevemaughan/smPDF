@@ -80,6 +80,7 @@ type
     fStrokeWidth: Double;
     fStrokeMode:  TPDFStrokeMode;
     fOpacity:     Double;
+    fFallbackFonts: string;
   public
     constructor Create;
 
@@ -98,6 +99,11 @@ type
     property StrokeMode:  TPDFStrokeMode  read fStrokeMode  write fStrokeMode;
     // 0 (invisible) to 1 (opaque, the default); applies to fill and outline.
     property Opacity:     Double          read fOpacity     write fOpacity;
+    // Semicolon-separated families to try, in order, for characters Name
+    // does not have (e.g. 'Microsoft YaHei;Yu Gothic'). Empty by default.
+    // Text is split into runs, each drawn in the first font that has its
+    // characters; measurement adds up the runs. See SystemFallbackFonts.
+    property FallbackFonts: string        read fFallbackFonts write fFallbackFonts;
   end;
 
   TPDFPen = class
@@ -162,6 +168,7 @@ type
     fProducer:          string;
     fCreationDate:      TDateTime;
     fCoordinatePrecision: Integer;
+    fFallbackChains:    TDictionary<string, TArray<TPDFFontResolution>>;
 
     procedure StartPage(AWidthPt, AHeightPt: Double; ADPI: Integer; APaperColor: TColor);
     procedure EnsureCurrentPage;
@@ -192,6 +199,7 @@ type
 
     function ResolveCurrentFont: TPDFFontResolution;
     function ShapeText(const AText: string; ARecord: Boolean): TPDFGlyphRuns;
+    function FallbackChain: TArray<TPDFFontResolution>;
     function TextWidthPt(const AText: string; ASizePt: Double): Double;
     function WrapLines(const AText: string; ASizePt, AMaxWidthPt: Double): TStringList;
     procedure EmitGlyphRuns(const ARuns: TPDFGlyphRuns; X, ABaselineY, ASizePt: Double;
@@ -362,10 +370,16 @@ type
     property CoordinatePrecision: Integer     read fCoordinatePrecision write SetCoordinatePrecision;
   end;
 
+// A fallback list for AFamily: the families Windows links to it for missing
+// characters (HKLM\...\FontLink\SystemLink), followed by 'Segoe UI;Microsoft
+// YaHei;Yu Gothic;Malgun Gothic;Nirmala UI', without duplicates. Suitable
+// for TPDFFont.FallbackFonts.
+function SystemFallbackFonts(const AFamily: string): string;
+
 implementation
 
 uses
-  System.Math, System.DateUtils, System.TimeSpan, smPDF.Geometry, smPDF.Types, smPDF.FontEmit, smPDF.GdiFonts;
+  Winapi.Windows, System.Math, System.DateUtils, System.TimeSpan, smPDF.Geometry, smPDF.Types, smPDF.FontEmit, smPDF.GdiFonts;
 
 { TPDFFont }
 
@@ -415,6 +429,7 @@ begin
   fFont              := TPDFFont.Create;
   fPages             := TObjectList<TPDFPage>.Create(True);
   fWarnings          := TStringList.Create;
+  fFallbackChains    := TDictionary<string, TArray<TPDFFontResolution>>.Create;
   fFonts             := TPDFFontRegistry.Create(fWarnings);
   fImageData         := TDictionary<string, TPDFImageData>.Create;
   fImageKeyByPicture := TDictionary<TObject, string>.Create;
@@ -435,6 +450,7 @@ destructor TsmPDF.Destroy;
 begin
   fImageKeyByPicture.Free;
   fImageData.Free;
+  fFallbackChains.Free;
   fFonts.Free;
   fWarnings.Free;
   fPages.Free;
@@ -1350,13 +1366,80 @@ end;
 // Text
 // ------------------------------------------------------------------
 
+// The primary font followed by each installed fallback, resolved with the
+// current Bold / Italics. Cached per font setting.
+function TsmPDF.FallbackChain: TArray<TPDFFontResolution>;
+var
+  key, family: string;
+  list: TList<TPDFFontResolution>;
+  std: TStandardFont;
+begin
+  key := LowerCase(fFont.Name + '|' + fFont.FallbackFonts) + '|' +
+    BoolToStr(fFont.Bold, True) + '|' + BoolToStr(fFont.Italics, True);
+  if fFallbackChains.TryGetValue(key, Result) then Exit;
+  list := TList<TPDFFontResolution>.Create;
+  try
+    list.Add(ResolveCurrentFont);
+    for family in fFont.FallbackFonts.Split([';']) do
+    begin
+      if Trim(family) = '' then Continue;
+      if TryResolveStandardFont(Trim(family), fFont.Bold, fFont.Italics, std) or
+         GdiFontInstalled(Trim(family)) then
+        list.Add(fFonts.Resolve(Trim(family), fFont.Bold, fFont.Italics))
+      else
+        fFonts.Warn(Format('Fallback font "%s" is not installed; it was skipped.', [Trim(family)]));
+    end;
+    Result := list.ToArray;
+  finally
+    list.Free;
+  end;
+  fFallbackChains.Add(key, Result);
+end;
+
 function TsmPDF.ShapeText(const AText: string; ARecord: Boolean): TPDFGlyphRuns;
 var
   cps: TArray<Cardinal>;
+  chain: TArray<TPDFFontResolution>;
+  runs: TList<TPDFGlyphRun>;
+  i, k, runStart, runFont, charFont: Integer;
 begin
   cps := TextToCodepoints(AText);
-  SetLength(Result, 1);
-  Result[0] := fFonts.EncodeRun(ResolveCurrentFont, cps, 0, Length(cps), ARecord);
+  if Trim(fFont.FallbackFonts) = '' then
+  begin
+    SetLength(Result, 1);
+    Result[0] := fFonts.EncodeRun(ResolveCurrentFont, cps, 0, Length(cps), ARecord);
+    Exit;
+  end;
+
+  // Each character goes to the first font in the chain that has it; characters
+  // no font has stay with the primary, which shows its missing-glyph box.
+  chain := FallbackChain;
+  runs := TList<TPDFGlyphRun>.Create;
+  try
+    runStart := 0;
+    runFont := -1;
+    for i := 0 to High(cps) do
+    begin
+      charFont := 0;
+      for k := 0 to High(chain) do
+        if fFonts.FaceHasGlyph(chain[k].Face, cps[i]) then
+        begin
+          charFont := k;
+          Break;
+        end;
+      if (runFont >= 0) and (charFont <> runFont) then
+      begin
+        runs.Add(fFonts.EncodeRun(chain[runFont], cps, runStart, i - runStart, ARecord));
+        runStart := i;
+      end;
+      runFont := charFont;
+    end;
+    if runFont >= 0 then
+      runs.Add(fFonts.EncodeRun(chain[runFont], cps, runStart, Length(cps) - runStart, ARecord));
+    Result := runs.ToArray;
+  finally
+    runs.Free;
+  end;
 end;
 
 function RunsAdvanceEm(const ARuns: TPDFGlyphRuns): Double;
@@ -2459,6 +2542,62 @@ begin
   fCurrentPage.ClosePath;
   PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
   fCurrentPage.RestoreState;
+end;
+
+// ------------------------------------------------------------------
+// Fallback font list
+// ------------------------------------------------------------------
+
+function SystemFallbackFonts(const AFamily: string): string;
+const
+  DEFAULTS: array[0..4] of string = ('Segoe UI', 'Microsoft YaHei', 'Yu Gothic',
+    'Malgun Gothic', 'Nirmala UI');
+  SYSTEM_LINK = 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontLink\SystemLink';
+var
+  families: TStringList;
+  key: HKEY;
+  valueType, size: DWORD;
+  buf: TBytes;
+  fields: TArray<string>;
+  raw, entry, family: string;
+begin
+  families := TStringList.Create;
+  try
+    families.CaseSensitive := False;
+    if RegOpenKeyEx(HKEY_LOCAL_MACHINE, SYSTEM_LINK, 0, KEY_READ or KEY_WOW64_64KEY, key) = ERROR_SUCCESS then
+    try
+      size := 0;
+      if (RegQueryValueEx(key, PChar(AFamily), nil, @valueType, nil, @size) = ERROR_SUCCESS) and
+         (valueType = REG_MULTI_SZ) and (size > 0) then
+      begin
+        SetLength(buf, size + 4);
+        FillChar(buf[0], Length(buf), 0);
+        if RegQueryValueEx(key, PChar(AFamily), nil, @valueType, @buf[0], @size) = ERROR_SUCCESS then
+        begin
+          // "FILE.TTC,Family[,scaling...]" entries separated by #0.
+          SetString(raw, PChar(@buf[0]), size div SizeOf(Char));
+          for entry in raw.Split([#0]) do
+          begin
+            fields := entry.Split([',']);
+            if Length(fields) < 2 then Continue;
+            family := Trim(fields[1]);
+            if (family <> '') and (families.IndexOf(family) < 0) then
+              families.Add(family);
+          end;
+        end;
+      end;
+    finally
+      RegCloseKey(key);
+    end;
+    for family in DEFAULTS do
+      if (families.IndexOf(family) < 0) and not SameText(family, AFamily) then
+        families.Add(family);
+    families.Delimiter := ';';
+    families.StrictDelimiter := True;
+    Result := families.DelimitedText;
+  finally
+    families.Free;
+  end;
 end;
 
 end.

@@ -15,6 +15,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   strokes and the Brush for fills, text uses `Font.Opacity` for its fill and
   outline, and a text background uses the Brush. Opaque drawing is unchanged.
   Valid in PDF 1.4; intended for things like a translucent trial watermark.
+- **Fallback fonts.** `Font.FallbackFonts` is a semicolon-separated list of
+  families (empty by default). When set, `DrawText`, `DrawParagraph` and every
+  measuring function split the text into runs, each drawn in the first font
+  (primary first) whose `cmap` has the character; characters no font has use
+  the primary font's missing-glyph box with a warning. Runs are placed one after
+  another on the baseline in a single text object, and measurement adds them
+  up. A fallback family that is not installed is skipped with a warning.
+- `SystemFallbackFonts(Family)` — a ready-made fallback list: the families
+  Windows links to `Family` (`FontLink\SystemLink`), then Segoe UI, Microsoft
+  YaHei, Yu Gothic, Malgun Gothic and Nirmala UI.
 
 ## [2.0.0] — 2026-09-23
 
