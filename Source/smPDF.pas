@@ -143,9 +143,12 @@ type
       const AWidth: Integer = 0; const AHeight: Integer = 0); overload;
     procedure NewPage; overload;
 
-    // Save returns the number of bytes written to AFileName.
+    // Save returns the number of bytes written. The stream overload writes at
+    // AStream.Position and leaves the stream open.
     function Save(const AFileName: string): Int64; overload;
     function Save(const AFileName: string; const AEmbedFonts: Boolean): Int64; overload;
+    function Save(AStream: TStream): Int64; overload;
+    function ToBytes: TBytes;
 
     // AAngle rotates the text counter-clockwise (in degrees) around (X, Y) —
     // matches VCL TFont.Orientation. 0 = horizontal, 90 = reads upward,
@@ -478,6 +481,7 @@ begin
   fWidth        := widthPx;
   fHeight       := heightPx;
   fPaperColor   := APaperColor;
+
   // Track the user-supplied AWidth/AHeight verbatim (pre-orientation-swap) so
   // a follow-up parameter-less NewPage can re-create a psCustom page faithfully.
   fCustomWidth  := AWidth;
@@ -523,7 +527,7 @@ begin
     raise EPDFError.Create('No active page. Call NewPage before drawing.');
 end;
 
-function TsmPDF.Save(const AFileName: string): Int64;
+function TsmPDF.ToBytes: TBytes;
 var
   writer: TPDFWriter;
   catalogId, pagesRootId, fontId, imgId: TPDFObjectId;
@@ -532,11 +536,8 @@ var
   fontNamesAcrossDoc, imageKeysAcrossDoc: TList<string>;
   pageFontName, pageImageKey: string;
   i: Integer;
-  bytes: TBytes;
-  fs: TFileStream;
   isSymbolic: Boolean;
 begin
-  Result := 0;
   if fPages.Count = 0 then
     raise EPDFError.Create('Cannot save: no pages added. Call NewPage first.');
 
@@ -617,16 +618,7 @@ begin
       writer.EndDict;
     writer.EndObject;
 
-    bytes := writer.Finalize(catalogId);
-
-    fs := TFileStream.Create(AFileName, fmCreate);
-    try
-      if Length(bytes) > 0 then
-        fs.WriteBuffer(bytes[0], Length(bytes));
-    finally
-      fs.Free;
-    end;
-    Result := Length(bytes);
+    Result := writer.Finalize(catalogId);
   finally
     writer.Free;
     imageKeysAcrossDoc.Free;
@@ -634,6 +626,35 @@ begin
     imageIds.Free;
     fontIds.Free;
   end;
+end;
+
+function TsmPDF.Save(AStream: TStream): Int64;
+var
+  bytes: TBytes;
+begin
+  if AStream = nil then
+    raise EPDFError.Create('Cannot save: stream is nil.');
+  bytes := ToBytes;
+  if Length(bytes) > 0 then
+    AStream.WriteBuffer(bytes[0], Length(bytes));
+  Result := Length(bytes);
+end;
+
+function TsmPDF.Save(const AFileName: string): Int64;
+var
+  fs: TFileStream;
+  bytes: TBytes;
+begin
+  // Build before creating the file so a failed build doesn't leave an empty file behind.
+  bytes := ToBytes;
+  fs := TFileStream.Create(AFileName, fmCreate);
+  try
+    if Length(bytes) > 0 then
+      fs.WriteBuffer(bytes[0], Length(bytes));
+  finally
+    fs.Free;
+  end;
+  Result := Length(bytes);
 end;
 
 function TsmPDF.Save(const AFileName: string; const AEmbedFonts: Boolean): Int64;

@@ -4,6 +4,19 @@ All notable changes to smPDF are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Save(AStream: TStream)` overload — writes the PDF at the stream's current
+  position and returns the byte count, so output never has to touch the disk.
+- `ToBytes: TBytes` — returns the complete PDF as a byte array.
+
+### Changed
+
+- `Save(AFileName)` no longer creates an empty file when it raises because no
+  pages were added.
+
 ## [1.0.0] — 2026-05-03
 
 First public release. The library is feature-complete across the six

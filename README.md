@@ -132,9 +132,25 @@ procedure NewPage(const APaperSize: TPDFPaperSize; const AOrientation: TPDFOrien
                   const ADPI: Integer = 300; const APaperColor: TColor = clWhite;
                   const AWidth: Integer = 0; const AHeight: Integer = 0); overload;
 procedure NewPage; overload;                          // A4 portrait, 300 dpi, white paper
-procedure Save(const AFileName: string); overload;
-procedure Save(const AFileName: string; const AEmbedFonts: Boolean); overload;
+function Save(const AFileName: string): Int64; overload;   // returns bytes written
+function Save(const AFileName: string; const AEmbedFonts: Boolean): Int64; overload;
+function Save(AStream: TStream): Int64; overload;         // writes at AStream.Position; stream stays open
+function ToBytes: TBytes;                                  // the whole PDF in memory
 function PageCount: Integer;
+```
+
+To produce a PDF without touching the disk (e.g. returning it from a web
+handler or attaching it to an email), use the stream overload or `ToBytes`:
+
+```pascal
+ms := TMemoryStream.Create;
+try
+  pdf.Save(ms);
+  ms.Position := 0;
+  // ... hand ms to the caller
+finally
+  ms.Free;
+end;
 ```
 
 Drawing:

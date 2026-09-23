@@ -42,6 +42,15 @@ type
     procedure Test_Save_threePages_kidsArrayHasThreeRefs;
     procedure Test_Save_LetterPortrait_72dpi;
     procedure Test_Save_returnsByteCount_matchingFileSize;
+
+    // In-memory output: Save(TStream) and ToBytes.
+    procedure Test_ToBytes_matchesSavedFile;
+    procedure Test_ToBytes_raisesEPDFErrorWhenNoPagesAdded;
+    procedure Test_SaveStream_matchesToBytesAndReturnsCount;
+    procedure Test_SaveStream_appendsAtCurrentPosition;
+    procedure Test_SaveStream_nilStream_raisesEPDFError;
+    procedure Test_SaveStream_raisesEPDFErrorWhenNoPagesAdded;
+    procedure Test_SaveFile_noPages_doesNotCreateFile;
   end;
 
 implementation
@@ -496,6 +505,162 @@ begin
   end;
   AssertTrue(returned > 0, 'Save should return a positive byte count');
   AssertEquals(actual, returned, 'Save return value matches file size on disk');
+end;
+
+procedure TIntegrationTests.Test_ToBytes_matchesSavedFile;
+var
+  pdf: TsmPDF;
+  fileName: string;
+  bytes: TBytes;
+begin
+  fileName := TempPdf('tobytes.pdf');
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage(psA4, poPortrait, 72);
+    pdf.DrawText('in memory', 50, 50);
+    pdf.DrawLine(10, 10, 200, 200);
+    pdf.Save(fileName);
+    bytes := pdf.ToBytes;
+  finally
+    pdf.Free;
+  end;
+  AssertStartsWith('%PDF-1.4', BytesToLatin1(bytes));
+  AssertBytesEqual(ReadAllBytes(fileName), bytes, 'ToBytes matches Save(file) byte for byte');
+end;
+
+procedure TIntegrationTests.Test_ToBytes_raisesEPDFErrorWhenNoPagesAdded;
+var
+  pdf: TsmPDF;
+  raised: Boolean;
+begin
+  pdf := TsmPDF.Create;
+  try
+    raised := False;
+    try
+      pdf.ToBytes;
+    except
+      on E: EPDFError do raised := True;
+    end;
+    AssertTrue(raised, 'ToBytes should raise EPDFError when no pages were added');
+  finally
+    pdf.Free;
+  end;
+end;
+
+procedure TIntegrationTests.Test_SaveStream_matchesToBytesAndReturnsCount;
+var
+  pdf: TsmPDF;
+  ms: TMemoryStream;
+  expected, actual: TBytes;
+  returned: Int64;
+begin
+  ms := TMemoryStream.Create;
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage(psLetter, poPortrait, 72);
+    pdf.DrawBox(20, 20, 300, 200);
+    expected := pdf.ToBytes;
+    returned := pdf.Save(ms);
+    AssertEquals(Int64(Length(expected)), returned, 'Save(stream) returns byte count');
+    AssertEquals(returned, ms.Size, 'Stream size equals returned byte count');
+    SetLength(actual, ms.Size);
+    ms.Position := 0;
+    ms.ReadBuffer(actual[0], ms.Size);
+    AssertBytesEqual(expected, actual, 'Save(stream) matches ToBytes');
+  finally
+    pdf.Free;
+    ms.Free;
+  end;
+end;
+
+procedure TIntegrationTests.Test_SaveStream_appendsAtCurrentPosition;
+const
+  PREFIX: array[0..3] of Byte = (Ord('A'), Ord('B'), Ord('C'), Ord('D'));
+var
+  pdf: TsmPDF;
+  ms: TMemoryStream;
+  returned: Int64;
+  all: TBytes;
+  s: string;
+begin
+  ms := TMemoryStream.Create;
+  pdf := TsmPDF.Create;
+  try
+    ms.WriteBuffer(PREFIX[0], Length(PREFIX));
+    pdf.NewPage(psA4, poPortrait, 72);
+    returned := pdf.Save(ms);
+    AssertEquals(Int64(Length(PREFIX)) + returned, ms.Size, 'PDF appended after existing content');
+    SetLength(all, ms.Size);
+    ms.Position := 0;
+    ms.ReadBuffer(all[0], ms.Size);
+    s := BytesToLatin1(all);
+    AssertStartsWith('ABCD%PDF-1.4', s, 'Existing content preserved, PDF follows');
+  finally
+    pdf.Free;
+    ms.Free;
+  end;
+end;
+
+procedure TIntegrationTests.Test_SaveStream_nilStream_raisesEPDFError;
+var
+  pdf: TsmPDF;
+  raised: Boolean;
+begin
+  pdf := TsmPDF.Create;
+  try
+    pdf.NewPage(psA4, poPortrait, 72);
+    raised := False;
+    try
+      pdf.Save(TStream(nil));
+    except
+      on E: EPDFError do raised := True;
+    end;
+    AssertTrue(raised, 'Save(nil stream) should raise EPDFError');
+  finally
+    pdf.Free;
+  end;
+end;
+
+procedure TIntegrationTests.Test_SaveStream_raisesEPDFErrorWhenNoPagesAdded;
+var
+  pdf: TsmPDF;
+  ms: TMemoryStream;
+  raised: Boolean;
+begin
+  ms := TMemoryStream.Create;
+  pdf := TsmPDF.Create;
+  try
+    raised := False;
+    try
+      pdf.Save(ms);
+    except
+      on E: EPDFError do raised := True;
+    end;
+    AssertTrue(raised, 'Save(stream) should raise EPDFError when no pages were added');
+    AssertEquals(Int64(0), ms.Size, 'Nothing written to the stream on failure');
+  finally
+    pdf.Free;
+    ms.Free;
+  end;
+end;
+
+procedure TIntegrationTests.Test_SaveFile_noPages_doesNotCreateFile;
+var
+  pdf: TsmPDF;
+  fileName: string;
+begin
+  fileName := TempPdf('no-pages.pdf');
+  pdf := TsmPDF.Create;
+  try
+    try
+      pdf.Save(fileName);
+    except
+      on E: EPDFError do ;
+    end;
+  finally
+    pdf.Free;
+  end;
+  AssertFalse(TFile.Exists(fileName), 'Failed Save should not leave a file on disk');
 end;
 
 initialization
