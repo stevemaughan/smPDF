@@ -24,7 +24,8 @@ uses
   Tests.PDF.ClipPath in 'Source\Tests.PDF.ClipPath.pas',
   Tests.PDF.Subset in 'Source\Tests.PDF.Subset.pas',
   Tests.PDF.Unicode in 'Source\Tests.PDF.Unicode.pas',
-  Tests.PDF.MapText in 'Source\Tests.PDF.MapText.pas';
+  Tests.PDF.MapText in 'Source\Tests.PDF.MapText.pas',
+  Tests.PDF.Info in 'Source\Tests.PDF.Info.pas';
 
 var
   results: TArray<TTestResult>;

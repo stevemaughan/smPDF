@@ -11,7 +11,7 @@ uses
 const
   // SemVer string, bumped per https://semver.org/. Read at runtime via
   // SMPDF_VERSION; useful for diagnostics, About boxes, and bug reports.
-  SMPDF_VERSION = '1.0.0';
+  SMPDF_VERSION = '2.0.0';
 
 type
   EPDFError = class(Exception);
@@ -146,6 +146,12 @@ type
     fPathOpen:          Boolean;
     fPathHasPoint:      Boolean;
     fTextOrigin:        TPDFTextOrigin;
+    fTitle:             string;
+    fAuthor:            string;
+    fSubject:           string;
+    fCreator:           string;
+    fProducer:          string;
+    fCreationDate:      TDateTime;
 
     procedure StartPage(AWidthPt, AHeightPt: Double; ADPI: Integer; APaperColor: TColor);
     procedure EnsureCurrentPage;
@@ -184,6 +190,7 @@ type
     function GetWarnings: TStrings;
 
     procedure WriteDocument(AWriter: TPDFWriter);
+    function  EmitInfo(AWriter: TPDFWriter): TPDFObjectId;
     function EmitImageObject(AWriter: TPDFWriter; const AData: TPDFImageData): TPDFObjectId;
     function GetOrAddImage(APicture: TPicture): string;
     function GetWidth: Integer;
@@ -326,12 +333,22 @@ type
     // could not show. Read-only; cleared only by creating a new TsmPDF.
     property Warnings:        TStrings        read GetWarnings;
     property TextOrigin:      TPDFTextOrigin  read fTextOrigin write fTextOrigin;
+
+    // Document information (/Info). Empty values are left out. Producer
+    // defaults to 'smPDF <version>'; CreationDate defaults to when this
+    // TsmPDF was created, so saving twice gives identical files.
+    property Title:           string          read fTitle        write fTitle;
+    property Author:          string          read fAuthor       write fAuthor;
+    property Subject:         string          read fSubject      write fSubject;
+    property Creator:         string          read fCreator      write fCreator;
+    property Producer:        string          read fProducer     write fProducer;
+    property CreationDate:    TDateTime       read fCreationDate write fCreationDate;
   end;
 
 implementation
 
 uses
-  System.Math, smPDF.Geometry, smPDF.Types, smPDF.FontEmit, smPDF.GdiFonts;
+  System.Math, System.DateUtils, System.TimeSpan, smPDF.Geometry, smPDF.Types, smPDF.FontEmit, smPDF.GdiFonts;
 
 { TPDFFont }
 
@@ -387,6 +404,8 @@ begin
   fOrientation     := poPortrait;
   fDPI             := 300;
   fTextOrigin      := toTypoTop;
+  fProducer        := 'smPDF ' + SMPDF_VERSION;
+  fCreationDate    := Now;
   fWidthPt         := 595.28;
   fHeightPt        := 841.89;
 end;
@@ -742,13 +761,86 @@ begin
       writer.EndDict;
     writer.EndObject;
 
-    writer.Finish(catalogId);
+    writer.Finish(catalogId, EmitInfo(writer));
   finally
     imageKeysAcrossDoc.Free;
     fontNamesAcrossDoc.Free;
     imageIds.Free;
     fontIds.Free;
   end;
+end;
+
+// PDF date string D:YYYYMMDDHHmmSS+hh'mm' in local time with its UTC offset.
+function PdfDateString(ADate: TDateTime): string;
+var
+  offset: TTimeSpan;
+  minutes: Integer;
+  sign: Char;
+begin
+  offset := TTimeZone.Local.GetUtcOffset(ADate);
+  minutes := Round(offset.TotalMinutes);
+  if minutes < 0 then
+  begin
+    sign := '-';
+    minutes := -minutes;
+  end
+  else
+    sign := '+';
+  Result := 'D:' + FormatDateTime('yyyymmddhhnnss', ADate) +
+    Format('%s%.2d''%.2d''', [sign, minutes div 60, minutes mod 60]);
+end;
+
+// A text string: plain PDF literal when ASCII, else UTF-16BE with a BOM.
+procedure WriteTextString(AWriter: TPDFWriter; const AValue: string);
+var
+  i: Integer;
+  ascii: Boolean;
+  bytes: TBytes;
+begin
+  ascii := True;
+  for i := 1 to Length(AValue) do
+    if Ord(AValue[i]) > 126 then
+    begin
+      ascii := False;
+      Break;
+    end;
+  if ascii then
+    AWriter.WriteLiteralString(AValue)
+  else
+  begin
+    SetLength(bytes, 2 + Length(AValue) * 2);
+    bytes[0] := $FE;
+    bytes[1] := $FF;
+    for i := 1 to Length(AValue) do
+    begin
+      bytes[i * 2]     := Byte(Ord(AValue[i]) shr 8);
+      bytes[i * 2 + 1] := Byte(Ord(AValue[i]));
+    end;
+    AWriter.WriteHexString(bytes);
+  end;
+end;
+
+function TsmPDF.EmitInfo(AWriter: TPDFWriter): TPDFObjectId;
+
+  procedure Entry(const AKey, AValue: string);
+  begin
+    if AValue = '' then Exit;
+    AWriter.WriteName(AKey);
+    WriteTextString(AWriter, AValue);
+  end;
+
+begin
+  Result := AWriter.BeginObject;
+    AWriter.BeginDict;
+      Entry('Title',    fTitle);
+      Entry('Author',   fAuthor);
+      Entry('Subject',  fSubject);
+      Entry('Creator',  fCreator);
+      Entry('Producer', fProducer);
+      AWriter.WriteName('CreationDate');
+      AWriter.WriteLiteralString(PdfDateString(fCreationDate));
+    AWriter.EndDict;
+  AWriter.EndObject;
 end;
 
 function TsmPDF.ToBytes: TBytes;

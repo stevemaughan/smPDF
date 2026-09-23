@@ -93,6 +93,10 @@ break source compatibility; they are marked **Breaking**.
 ### Added
 
 - `Warnings: TStrings` — every fallback the library had to make, one line each.
+- Document information: `Title`, `Author`, `Subject`, `Creator`, `Producer`
+  (default `'smPDF ' + SMPDF_VERSION`) and `CreationDate` (default: when the
+  `TsmPDF` was created), written as an `/Info` dictionary referenced from the
+  trailer. Non-ASCII values are UTF-16BE with a byte-order mark.
 - `TextOrigin: TPDFTextOrigin` — `toTypoTop` (default, unchanged placement),
   `toGdiTop` (Y is the top of GDI's cell: the baseline sits at `Y + usWinAscent`
   and `TextHeight` is `usWinAscent + usWinDescent`, so labels measure and stack
