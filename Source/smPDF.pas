@@ -79,6 +79,7 @@ type
     fStrokeStyle: TPDFStrokeStyle;
     fStrokeWidth: Double;
     fStrokeMode:  TPDFStrokeMode;
+    fOpacity:     Double;
   public
     constructor Create;
 
@@ -95,6 +96,8 @@ type
     // StrokeStyle fraction and turns the outline on.
     property StrokeWidth: Double          read fStrokeWidth write fStrokeWidth;
     property StrokeMode:  TPDFStrokeMode  read fStrokeMode  write fStrokeMode;
+    // 0 (invisible) to 1 (opaque, the default); applies to fill and outline.
+    property Opacity:     Double          read fOpacity     write fOpacity;
   end;
 
   TPDFPen = class
@@ -104,6 +107,7 @@ type
     fStyle:    TPDFPenStyle;
     fLineCap:  TPDFLineCap;
     fLineJoin: TPDFLineJoin;
+    fOpacity:  Double;
   public
     constructor Create;
 
@@ -112,17 +116,22 @@ type
     property Style:    TPDFPenStyle read fStyle    write fStyle;
     property LineCap:  TPDFLineCap  read fLineCap  write fLineCap;
     property LineJoin: TPDFLineJoin read fLineJoin write fLineJoin;
+    // 0 (invisible) to 1 (opaque, the default).
+    property Opacity:  Double       read fOpacity  write fOpacity;
   end;
 
   TPDFBrush = class
   strict private
-    fColor: TColor;
-    fStyle: TPDFBrushStyle;
+    fColor:   TColor;
+    fStyle:   TPDFBrushStyle;
+    fOpacity: Double;
   public
     constructor Create;
 
-    property Color: TColor         read fColor write fColor;
-    property Style: TPDFBrushStyle read fStyle write fStyle;
+    property Color:   TColor         read fColor   write fColor;
+    property Style:   TPDFBrushStyle read fStyle   write fStyle;
+    // 0 (invisible) to 1 (opaque, the default).
+    property Opacity: Double         read fOpacity write fOpacity;
   end;
 
   TsmPDF = class
@@ -370,6 +379,7 @@ begin
   fStrokeStyle := ssNone;
   fStrokeWidth := 0;
   fStrokeMode  := smOverFill;
+  fOpacity     := 1;
 end;
 
 { TPDFPen }
@@ -382,6 +392,7 @@ begin
   fStyle    := penSolid;
   fLineCap  := lcButt;
   fLineJoin := ljMiter;
+  fOpacity  := 1;
 end;
 
 { TPDFBrush }
@@ -389,8 +400,9 @@ end;
 constructor TPDFBrush.Create;
 begin
   inherited;
-  fColor := clWhite;
-  fStyle := brushClear;
+  fColor   := clWhite;
+  fStyle   := brushClear;
+  fOpacity := 1;
 end;
 
 { TsmPDF }
@@ -706,9 +718,10 @@ var
   writer: TPDFWriter;
   catalogId, pagesRootId, fontId, imgId: TPDFObjectId;
   pageIds: array of TPDFObjectId;
-  fontIds, imageIds: TDictionary<string, TPDFObjectId>;
+  fontIds, imageIds, alphaIds: TDictionary<string, TPDFObjectId>;
   fontNamesAcrossDoc, imageKeysAcrossDoc: TList<string>;
-  pageFontName, pageImageKey: string;
+  pageFontName, pageImageKey, alphaKey: string;
+  alphaParts: TArray<string>;
   i: Integer;
   face: TPDFFontFace;
 begin
@@ -718,6 +731,7 @@ begin
   writer              := AWriter;
   fontIds             := TDictionary<string, TPDFObjectId>.Create;
   imageIds            := TDictionary<string, TPDFObjectId>.Create;
+  alphaIds            := TDictionary<string, TPDFObjectId>.Create;
   fontNamesAcrossDoc  := TList<string>.Create;
   imageKeysAcrossDoc  := TList<string>.Create;
   try
@@ -762,9 +776,24 @@ begin
       imageIds.Add(pageImageKey, imgId);
     end;
 
+    // One ExtGState object per distinct (stroke, fill) alpha pair in the document.
+    for i := 0 to fPages.Count - 1 do
+      for alphaKey in fPages[i].UsedAlphaKeys do
+        if not alphaIds.ContainsKey(alphaKey) then
+        begin
+          alphaParts := alphaKey.Split([' ']);
+          alphaIds.Add(alphaKey, writer.BeginObject);
+            writer.BeginDict;
+              writer.WriteName('Type'); writer.WriteName('ExtGState');
+              writer.WriteName('CA');   writer.WriteNumber(StrToFloat(alphaParts[0], TFormatSettings.Invariant));
+              writer.WriteName('ca');   writer.WriteNumber(StrToFloat(alphaParts[1], TFormatSettings.Invariant));
+            writer.EndDict;
+          writer.EndObject;
+        end;
+
     SetLength(pageIds, fPages.Count);
     for i := 0 to fPages.Count - 1 do
-      pageIds[i] := fPages[i].Emit(writer, pagesRootId, fontIds, imageIds, fCompressStreams);
+      pageIds[i] := fPages[i].Emit(writer, pagesRootId, fontIds, imageIds, fCompressStreams, alphaIds);
 
     writer.BeginReservedObject(pagesRootId);
       writer.BeginDict;
@@ -782,6 +811,7 @@ begin
   finally
     imageKeysAcrossDoc.Free;
     fontNamesAcrossDoc.Free;
+    alphaIds.Free;
     imageIds.Free;
     fontIds.Free;
   end;
@@ -1006,6 +1036,7 @@ begin
   if ABrush.Style <> brushSolid then Exit;
   ColorToRGBFloats(ABrush.Color, r, g, b);
   APage.SaveState;
+  APage.SetAlpha(1, ABrush.Opacity);
   APage.SetFillRGB(r, g, b);
   APage.UserRectanglePath(X1, Y1, X2, Y2);
   APage.FillEvenOdd;
@@ -1548,6 +1579,7 @@ begin
     emboldened := emboldened or runs[i].Resolution.SyntheticBold;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fFont.Opacity, fFont.Opacity);
   ColorToRGBFloats(fFont.Color, r, g, b);
   fCurrentPage.SetFillRGB(r, g, b);
   if halo then
@@ -1601,6 +1633,7 @@ begin
     underlineYPx := ABaselineY + PtToPx(0.12 * sizePt);
 
     fCurrentPage.SaveState;
+    fCurrentPage.SetAlpha(fFont.Opacity, 1);
     fCurrentPage.SetStrokeRGB(r, g, b);
     fCurrentPage.SetLineWidthPt(underlineThicknessPt);
     fCurrentPage.SetDashPattern([], 0);
@@ -1781,6 +1814,7 @@ begin
     halo := HaloActive;
     underFill := halo and (fFont.StrokeMode = smUnderFill);
     fCurrentPage.SaveState;
+    fCurrentPage.SetAlpha(fFont.Opacity, fFont.Opacity);
     if halo then
     begin
       ColorToRGBFloats(fFont.StrokeColor, r, g, b);
@@ -2045,6 +2079,7 @@ begin
   if fPen.Style = penNone then Exit;  // lines have no fill; nothing to draw
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, 1);
   ApplyStrokeState(fCurrentPage, fPen);
   fCurrentPage.UserMoveTo(x1, y1);
   fCurrentPage.UserLineTo(x2, y2);
@@ -2063,6 +2098,7 @@ begin
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   fCurrentPage.UserRectanglePath(x1, y1, x2, y2);
   PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
@@ -2080,6 +2116,7 @@ begin
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   fCurrentPage.UserOvalPath(x1, y1, x2, y2);
   PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
@@ -2095,6 +2132,7 @@ begin
   if fPen.Style = penNone then Exit;  // open polylines have no fill
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, 1);
   ApplyStrokeState(fCurrentPage, fPen);
   fCurrentPage.UserMoveTo(APointList[0].X, APointList[0].Y);
   for i := 1 to APointList.Count - 1 do
@@ -2112,6 +2150,7 @@ begin
   if fPen.Style = penNone then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, 1);
   ApplyStrokeState(fCurrentPage, fPen);
   fCurrentPage.UserMoveTo(APointList[0].X, APointList[0].Y);
   for i := 1 to APointList.Count - 1 do
@@ -2127,6 +2166,7 @@ begin
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   EmitPolygonPath(fCurrentPage, APointList);
   PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
@@ -2140,6 +2180,7 @@ begin
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   EmitPolygonPathF(fCurrentPage, APointList);
   PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
@@ -2153,6 +2194,7 @@ begin
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   fCurrentPage.SetClipRect(AClipRect.Left, AClipRect.Top, AClipRect.Right, AClipRect.Bottom);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   EmitPolygonPath(fCurrentPage, APointList);
@@ -2167,6 +2209,7 @@ begin
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   fCurrentPage.SetClipRect(AClipRect.Left, AClipRect.Top, AClipRect.Right, AClipRect.Bottom);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   EmitPolygonPathF(fCurrentPage, APointList);
@@ -2184,6 +2227,7 @@ begin
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   first := 0;
   for part := 0 to High(ACounts) do
@@ -2212,6 +2256,7 @@ begin
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   first := 0;
   for part := 0 to High(ACounts) do
@@ -2248,6 +2293,7 @@ begin
   if fPen.Style = penNone then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, 1);
   ApplyStrokeState(fCurrentPage, fPen);
   fCurrentPage.UserMoveTo(APoints[0].X, APoints[0].Y);
   for i := 1 to n - 1 do
@@ -2334,6 +2380,7 @@ begin
   if (fCurrentPage.CapturedPathSize = 0) or not (ADoFill or ADoStroke) then Exit;
 
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   if ADoStroke then
     ApplyStrokeState(fCurrentPage, fPen);
   if ADoFill then
@@ -2398,6 +2445,7 @@ begin
   kx := KAPPA * rx;
   ky := KAPPA * ry;
   fCurrentPage.SaveState;
+  fCurrentPage.SetAlpha(fPen.Opacity, fBrush.Opacity);
   ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
   fCurrentPage.UserMoveTo(l + rx, t);
   fCurrentPage.UserLineTo(rt - rx, t);

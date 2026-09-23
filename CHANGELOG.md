@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Opacity.** `Pen.Opacity`, `Brush.Opacity` and `Font.Opacity` (0 to 1,
+  default 1). Translucent drawing selects an `/ExtGState` with `/CA` (stroke)
+  and `/ca` (fill) inside the drawing's own `q ... Q`; one ExtGState object
+  per distinct pair is shared across the document. Shapes use the Pen for
+  strokes and the Brush for fills, text uses `Font.Opacity` for its fill and
+  outline, and a text background uses the Brush. Opaque drawing is unchanged.
+  Valid in PDF 1.4; intended for things like a translucent trial watermark.
+
 ## [2.0.0] — 2026-09-23
 
 The release that makes smPDF a replacement for Gnostice eDocEngine in

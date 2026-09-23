@@ -21,6 +21,8 @@ type
     fFontOrder:     TList<string>;                // insertion order for stable iteration
     fImageMap:      TDictionary<string, string>;  // image key -> page-local name (Im1, Im2, ...)
     fImageOrder:    TList<string>;                // insertion order for stable iteration
+    fAlphaMap:      TDictionary<string, string>;  // alpha key (see AlphaKey) -> page-local name (GS1, GS2, ...)
+    fAlphaOrder:    TList<string>;
 
     procedure WriteRaw(const AStr: string);
     procedure WriteOp(const AOperator: string; const AOperands: array of Double);
@@ -42,7 +44,16 @@ type
     function Emit(AWriter: TPDFWriter; AParentId: TPDFObjectId;
       AFontIds: TDictionary<string, TPDFObjectId> = nil;
       AImageIds: TDictionary<string, TPDFObjectId> = nil;
-      ACompress: Boolean = False): TPDFObjectId;
+      ACompress: Boolean = False;
+      AAlphaIds: TDictionary<string, TPDFObjectId> = nil): TPDFObjectId;
+
+    // ---------- Transparency ----------
+    // Writes "/GSn gs" selecting stroke alpha AStroke and fill alpha AFill
+    // (each 0..1), registering the ExtGState on the page. Does nothing when
+    // both are 1, so opaque drawing is unchanged.
+    procedure SetAlpha(AStroke, AFill: Double);
+    // Alpha keys ("CA ca") used on this page, in insertion order.
+    function UsedAlphaKeys: TArray<string>;
 
     // ---------- Page-local font resource registry ----------
     // Returns the page-local resource name (F1, F2, ...) for the given PDF font
@@ -160,10 +171,14 @@ begin
   fFontOrder     := TList<string>.Create;
   fImageMap      := TDictionary<string, string>.Create;
   fImageOrder    := TList<string>.Create;
+  fAlphaMap      := TDictionary<string, string>.Create;
+  fAlphaOrder    := TList<string>.Create;
 end;
 
 destructor TPDFPage.Destroy;
 begin
+  fAlphaOrder.Free;
+  fAlphaMap.Free;
   fImageOrder.Free;
   fImageMap.Free;
   fFontOrder.Free;
@@ -219,6 +234,30 @@ end;
 function TPDFPage.UsedImageKeys: TArray<string>;
 begin
   Result := fImageOrder.ToArray;
+end;
+
+procedure TPDFPage.SetAlpha(AStroke, AFill: Double);
+var
+  key, name: string;
+begin
+  if AStroke < 0 then AStroke := 0 else if AStroke > 1 then AStroke := 1;
+  if AFill < 0 then AFill := 0 else if AFill > 1 then AFill := 1;
+  if (AStroke >= 1) and (AFill >= 1) then Exit;
+  key := FormatPdfNumber(AStroke) + ' ' + FormatPdfNumber(AFill);
+  if not fAlphaMap.TryGetValue(key, name) then
+  begin
+    name := 'GS' + IntToStr(fAlphaOrder.Count + 1);
+    fAlphaMap.Add(key, name);
+    fAlphaOrder.Add(key);
+  end;
+  fOut.AppendByte(Ord('/'));
+  fOut.AppendAscii(name);
+  fOut.AppendAscii(' gs'#10);
+end;
+
+function TPDFPage.UsedAlphaKeys: TArray<string>;
+begin
+  Result := fAlphaOrder.ToArray;
 end;
 
 procedure TPDFPage.DrawImageUserRect(const AResName: string;
@@ -578,8 +617,11 @@ end;
 function TPDFPage.Emit(AWriter: TPDFWriter; AParentId: TPDFObjectId;
   AFontIds: TDictionary<string, TPDFObjectId> = nil;
   AImageIds: TDictionary<string, TPDFObjectId> = nil;
-  ACompress: Boolean = False): TPDFObjectId;
+  ACompress: Boolean = False;
+  AAlphaIds: TDictionary<string, TPDFObjectId> = nil): TPDFObjectId;
 var
+  alphaKey: string;
+  alphaObjId: TPDFObjectId;
   packed_: TBytes;
   contentId, pageId: TPDFObjectId;
   fontName, imageKey: string;
@@ -634,6 +676,18 @@ begin
               begin
                 AWriter.WriteName(fFontMap[fontName]);
                 AWriter.WriteRef(fontObjId);
+              end;
+          AWriter.EndDict;
+        end;
+        if (AAlphaIds <> nil) and (fAlphaOrder.Count > 0) then
+        begin
+          AWriter.WriteName('ExtGState');
+          AWriter.BeginDict;
+            for alphaKey in fAlphaOrder do
+              if AAlphaIds.TryGetValue(alphaKey, alphaObjId) then
+              begin
+                AWriter.WriteName(fAlphaMap[alphaKey]);
+                AWriter.WriteRef(alphaObjId);
               end;
           AWriter.EndDict;
         end;
