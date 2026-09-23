@@ -137,14 +137,16 @@ type
       AAlignment: TAlignment; AStretch: Boolean);
 
     function ResolveCurrentFont: TPDFFontResolution;
-    function MeasureWidthPt(const AResolved: TPDFFontResolution; ASizePt: Double; const AAnsi: AnsiString): Double;
+    function ShapeText(const AText: string; ARecord: Boolean): TPDFGlyphRuns;
+    function TextWidthPt(const AText: string; ASizePt: Double): Double;
+    function WrapLines(const AText: string; ASizePt, AMaxWidthPt: Double): TStringList;
+    procedure EmitGlyphRuns(const ARuns: TPDFGlyphRuns; X, ABaselineY, ASizePt: Double;
+      AForceMode: Integer);
     function FontAscentPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
     function FontLineHeightPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
     function GetWarnings: TStrings;
 
     procedure WriteDocument(AWriter: TPDFWriter);
-    function EmitTrueTypeFont(AWriter: TPDFWriter; AFace: TPDFFontFace): TPDFObjectId;
-    function EmitStandardFont(AWriter: TPDFWriter; AFont: TStandardFont): TPDFObjectId;
     function EmitImageObject(AWriter: TPDFWriter; const AData: TPDFImageData): TPDFObjectId;
     function GetOrAddImage(APicture: TPicture): string;
     function GetWidth: Integer;
@@ -282,7 +284,7 @@ type
 implementation
 
 uses
-  System.Math, smPDF.Geometry, smPDF.Types, smPDF.Subset;
+  System.Math, smPDF.Geometry, smPDF.Types, smPDF.FontEmit;
 
 { TPDFFont }
 
@@ -388,24 +390,6 @@ begin
   Result := fFonts.Resolve(fFont.Name, fFont.Bold, fFont.Italics);
 end;
 
-function TsmPDF.MeasureWidthPt(const AResolved: TPDFFontResolution; ASizePt: Double;
-  const AAnsi: AnsiString): Double;
-var
-  i, sumUnits: Integer;
-  ttf: TTTFFont;
-begin
-  if AResolved.Face.IsStandard then
-    Result := StandardFontTextWidth(AResolved.Face.StdFont, ASizePt, AAnsi)
-  else
-  begin
-    ttf := AResolved.Face.TTF;
-    sumUnits := 0;
-    for i := 1 to Length(AAnsi) do
-      sumUnits := sumUnits + ttf.CharWidthWinAnsi(Byte(AAnsi[i]));
-    Result := sumUnits * ASizePt / ttf.Metrics.UnitsPerEm;
-  end;
-end;
-
 function TsmPDF.FontAscentPt(const AResolved: TPDFFontResolution; ASizePt: Double): Double;
 begin
   if AResolved.Face.IsStandard then
@@ -419,138 +403,6 @@ function TsmPDF.FontLineHeightPt(const AResolved: TPDFFontResolution; ASizePt: D
 begin
   // Same 1.2x convention for both Standard 14 and TTF.
   Result := 1.2 * ASizePt;
-end;
-
-function TsmPDF.EmitStandardFont(AWriter: TPDFWriter; AFont: TStandardFont): TPDFObjectId;
-begin
-  Result := AWriter.BeginObject;
-    AWriter.BeginDict;
-      AWriter.WriteName('Type');     AWriter.WriteName('Font');
-      AWriter.WriteName('Subtype');  AWriter.WriteName('Type1');
-      AWriter.WriteName('BaseFont'); AWriter.WriteName(StandardFontPdfName(AFont));
-      if not StandardFontIsSymbolic(AFont) then
-      begin
-        AWriter.WriteName('Encoding'); AWriter.WriteName('WinAnsiEncoding');
-      end;
-    AWriter.EndDict;
-  AWriter.EndObject;
-end;
-
-procedure RecordWinAnsiGlyphs(AFace: TPDFFontFace; const AAnsi: AnsiString);
-var
-  i: Integer;
-  cp: Cardinal;
-  gid: Word;
-begin
-  for i := 1 to Length(AAnsi) do
-  begin
-    cp := WinAnsiToUnicode(Byte(AAnsi[i]));
-    gid := AFace.TTF.GlyphIndex(cp);
-    if gid <> 0 then
-      AFace.RecordGlyph(gid, cp);
-  end;
-end;
-
-// The embedded font program: a hollow subset carrying only the glyphs drawn,
-// or the whole font when its fsType forbids subsetting.
-function EmbeddedFontProgram(AFace: TPDFFontFace; out AFontName: string): TBytes;
-var
-  used: TArray<Word>;
-  charMap: TArray<TSubsetCharMapping>;
-  i: Integer;
-  ttf: TTTFFont;
-begin
-  ttf := AFace.TTF;
-  if ttf.SubsettingForbidden then
-  begin
-    AFontName := ttf.Metrics.PostScriptName;
-    Exit(ttf.Bytes);
-  end;
-  used := AFace.UsedGlyphs;
-  SetLength(charMap, Length(used));
-  for i := 0 to High(used) do
-  begin
-    charMap[i].GlyphId   := used[i];
-    charMap[i].Codepoint := AFace.UsedGlyphCodepoint(used[i]);
-  end;
-  AFontName := MakeSubsetTag(ttf.Metrics.PostScriptName, SubsetGlyphClosure(ttf, used)) +
-    '+' + ttf.Metrics.PostScriptName;
-  Result := BuildHollowSubset(ttf, used, charMap, AFontName);
-end;
-
-function TsmPDF.EmitTrueTypeFont(AWriter: TPDFWriter; AFace: TPDFFontFace): TPDFObjectId;
-var
-  ATTF: TTTFFont;
-  m: TTTFFontMetrics;
-  fontFileId, descriptorId: TPDFObjectId;
-  i: Integer;
-  program_, payload: TBytes;
-  fontName: string;
-  rawLength: Integer;
-  compress: Boolean;
-begin
-  ATTF := AFace.TTF;
-  m := ATTF.Metrics;
-  program_ := EmbeddedFontProgram(AFace, fontName);
-
-  // FontFile2 — embedded TTF stream; /Length1 is always the uncompressed length
-  rawLength := Length(program_);
-  compress  := fCompressStreams;
-  if compress then
-    payload := FlateCompress(program_)
-  else
-    payload := program_;
-  fontFileId := AWriter.EmitStreamObject(payload,
-    procedure(w: TPDFWriter)
-    begin
-      if compress then
-      begin
-        w.WriteName('Filter'); w.WriteName('FlateDecode');
-      end;
-      w.WriteName('Length1'); w.WriteInt(rawLength);
-    end);
-
-  // FontDescriptor
-  descriptorId := AWriter.BeginObject;
-    AWriter.BeginDict;
-      AWriter.WriteName('Type');     AWriter.WriteName('FontDescriptor');
-      AWriter.WriteName('FontName'); AWriter.WriteName(fontName);
-      AWriter.WriteName('Flags');    AWriter.WriteInt(Integer(m.PdfFlags));
-
-      AWriter.WriteName('FontBBox');
-      AWriter.BeginArray;
-        AWriter.WriteInt(ATTF.FontUnitsToPdf(m.XMin));
-        AWriter.WriteInt(ATTF.FontUnitsToPdf(m.YMin));
-        AWriter.WriteInt(ATTF.FontUnitsToPdf(m.XMax));
-        AWriter.WriteInt(ATTF.FontUnitsToPdf(m.YMax));
-      AWriter.EndArray;
-
-      AWriter.WriteName('ItalicAngle'); AWriter.WriteNumber(m.ItalicAngle);
-      AWriter.WriteName('Ascent');      AWriter.WriteInt(ATTF.FontUnitsToPdf(m.Ascent));
-      AWriter.WriteName('Descent');     AWriter.WriteInt(ATTF.FontUnitsToPdf(m.Descent));
-      AWriter.WriteName('CapHeight');   AWriter.WriteInt(ATTF.FontUnitsToPdf(m.CapHeight));
-      AWriter.WriteName('StemV');       AWriter.WriteInt(m.StemV);
-      AWriter.WriteName('FontFile2');   AWriter.WriteRef(fontFileId);
-    AWriter.EndDict;
-  AWriter.EndObject;
-
-  // Font dictionary (TrueType)
-  Result := AWriter.BeginObject;
-    AWriter.BeginDict;
-      AWriter.WriteName('Type');           AWriter.WriteName('Font');
-      AWriter.WriteName('Subtype');        AWriter.WriteName('TrueType');
-      AWriter.WriteName('BaseFont');       AWriter.WriteName(fontName);
-      AWriter.WriteName('Encoding');       AWriter.WriteName('WinAnsiEncoding');
-      AWriter.WriteName('FirstChar');      AWriter.WriteInt(32);
-      AWriter.WriteName('LastChar');       AWriter.WriteInt(255);
-      AWriter.WriteName('Widths');
-      AWriter.BeginArray;
-        for i := 32 to 255 do
-          AWriter.WriteInt(ATTF.FontUnitsToPdf(ATTF.CharWidthWinAnsi(Byte(i))));
-      AWriter.EndArray;
-      AWriter.WriteName('FontDescriptor'); AWriter.WriteRef(descriptorId);
-    AWriter.EndDict;
-  AWriter.EndObject;
 end;
 
 // Exact paper sizes in points (portrait).
@@ -727,7 +579,7 @@ begin
         if imageKeysAcrossDoc.IndexOf(pageImageKey) < 0 then
           imageKeysAcrossDoc.Add(pageImageKey);
 
-    // Emit font dicts. Standard 14 -> single Type1 dict; TTF -> Font + Descriptor + FontFile2.
+    // Emit font dicts. Standard 14 -> Type1 + WinAnsi; TrueType -> Type0 / CIDFontType2.
     for pageFontName in fontNamesAcrossDoc do
     begin
       if not fFonts.FindFace(pageFontName, face) then
@@ -735,7 +587,7 @@ begin
       if face.IsStandard then
         fontId := EmitStandardFont(writer, face.StdFont)
       else
-        fontId := EmitTrueTypeFont(writer, face);
+        fontId := EmitType0Font(writer, face, fCompressStreams);
       fontIds.Add(pageFontName, fontId);
     end;
 
@@ -1227,49 +1079,141 @@ begin
 end;
 
 // ------------------------------------------------------------------
-// Phase 3 — text rendering with the 14 standard PDF fonts
+// Text
 // ------------------------------------------------------------------
 
-// Word-wrap helper: split text on whitespace and group words into lines that
-// fit within AMaxWidthPoints when measured at the given font + size.
-// Returns a TStringList the caller must Free.
-function WrapTextToLines(const AText: string; AFont: TStandardFont;
-  ASizePt: Double; AMaxWidthPoints: Double): TStringList;
+function TsmPDF.ShapeText(const AText: string; ARecord: Boolean): TPDFGlyphRuns;
 var
-  words: TArray<string>;
-  i: Integer;
-  currentLine, candidate: string;
-  candidateAnsi: AnsiString;
-  candidateWidth: Double;
+  cps: TArray<Cardinal>;
 begin
-  Result := TStringList.Create;
-  if AText = '' then Exit;
+  cps := TextToCodepoints(AText);
+  SetLength(Result, 1);
+  Result[0] := fFonts.EncodeRun(ResolveCurrentFont, cps, 0, Length(cps), ARecord);
+end;
 
-  words := AText.Split([' ', #9, #13, #10],
-    TStringSplitOptions.ExcludeEmpty);
-  if Length(words) = 0 then Exit;
+function RunsAdvanceEm(const ARuns: TPDFGlyphRuns): Double;
+var
+  i: Integer;
+begin
+  Result := 0;
+  for i := 0 to High(ARuns) do
+    Result := Result + ARuns[i].AdvanceEm;
+end;
 
-  currentLine := '';
-  for i := 0 to High(words) do
+function TsmPDF.TextWidthPt(const AText: string; ASizePt: Double): Double;
+begin
+  if AText = '' then
+    Result := 0
+  else
+    Result := RunsAdvanceEm(ShapeText(AText, False)) * ASizePt;
+end;
+
+type
+  TWrapToken = record
+    Text:        string;
+    SpaceBefore: Boolean;
+  end;
+
+// Split text into the pieces a line may break between: runs of non-space
+// characters, and single CJK characters (those scripts have no spaces).
+function WrapTokens(const AText: string): TArray<TWrapToken>;
+var
+  list: TList<TWrapToken>;
+  cur: string;
+  curSpace, pendingSpace: Boolean;
+  i, n: Integer;
+  cp: Cardinal;
+  unitText: string;
+  tok: TWrapToken;
+
+  procedure Flush;
   begin
-    if currentLine = '' then
-      candidate := words[i]
-    else
-      candidate := currentLine + ' ' + words[i];
-
-    candidateAnsi  := StringToWinAnsi(candidate);
-    candidateWidth := StandardFontTextWidth(AFont, ASizePt, candidateAnsi);
-
-    if (candidateWidth <= AMaxWidthPoints) or (currentLine = '') then
-      currentLine := candidate
-    else
+    if cur <> '' then
     begin
-      Result.Add(currentLine);
-      currentLine := words[i];
+      tok.Text := cur;
+      tok.SpaceBefore := curSpace;
+      list.Add(tok);
+      cur := '';
     end;
   end;
-  if currentLine <> '' then
-    Result.Add(currentLine);
+
+begin
+  list := TList<TWrapToken>.Create;
+  try
+    cur := '';
+    curSpace := False;
+    pendingSpace := False;
+    i := 1;
+    while i <= Length(AText) do
+    begin
+      if (AText[i] >= #$D800) and (AText[i] <= #$DBFF) and (i < Length(AText)) then n := 2 else n := 1;
+      unitText := Copy(AText, i, n);
+      if n = 2 then
+        cp := $10000 + ((Cardinal(Ord(AText[i])) - $D800) shl 10) + (Cardinal(Ord(AText[i + 1])) - $DC00)
+      else
+        cp := Ord(AText[i]);
+      Inc(i, n);
+
+      if (cp = $20) or (cp = 9) or (cp = 10) or (cp = 13) then
+      begin
+        Flush;
+        pendingSpace := True;
+      end
+      else if IsCJKCodepoint(cp) then
+      begin
+        Flush;
+        tok.Text := unitText;
+        tok.SpaceBefore := pendingSpace;
+        list.Add(tok);
+        pendingSpace := False;
+      end
+      else
+      begin
+        if cur = '' then
+        begin
+          curSpace := pendingSpace;
+          pendingSpace := False;
+        end;
+        cur := cur + unitText;
+      end;
+    end;
+    Flush;
+    Result := list.ToArray;
+  finally
+    list.Free;
+  end;
+end;
+
+// Greedy word wrap into lines no wider than AMaxWidthPt: breaks at spaces and
+// between CJK characters. A token wider than the line stays on its own line.
+function TsmPDF.WrapLines(const AText: string; ASizePt, AMaxWidthPt: Double): TStringList;
+var
+  tokens: TArray<TWrapToken>;
+  i: Integer;
+  line, candidate: string;
+begin
+  Result := TStringList.Create;
+  tokens := WrapTokens(AText);
+  line := '';
+  for i := 0 to High(tokens) do
+  begin
+    if line = '' then
+      candidate := tokens[i].Text
+    else if tokens[i].SpaceBefore then
+      candidate := line + ' ' + tokens[i].Text
+    else
+      candidate := line + tokens[i].Text;
+
+    if (line = '') or (TextWidthPt(candidate, ASizePt) <= AMaxWidthPt) then
+      line := candidate
+    else
+    begin
+      Result.Add(line);
+      line := tokens[i].Text;
+    end;
+  end;
+  if line <> '' then
+    Result.Add(line);
 end;
 
 // Map StrokeStyle to a point-width for outlined text. Scales with font size so
@@ -1292,32 +1236,69 @@ const
   SYNTHETIC_BOLD_EM   = 0.03;
   SYNTHETIC_ITALIC_TAN = 0.2126;
 
+// Show each run at its own pen position inside an open BT. AForceMode >= 0
+// sets the rendering mode for every run; otherwise synthetic-bold runs use
+// fill + stroke (2) and the others fill (0).
+procedure TsmPDF.EmitGlyphRuns(const ARuns: TPDFGlyphRuns; X, ABaselineY, ASizePt: Double;
+  AForceMode: Integer);
+var
+  i, mode, lastMode: Integer;
+  penX: Double;
+  run: TPDFGlyphRun;
+begin
+  penX := X;
+  lastMode := 0;
+  for i := 0 to High(ARuns) do
+  begin
+    run := ARuns[i];
+    fCurrentPage.SetTextFont(fCurrentPage.UseFont(run.Resolution.Face.Key), ASizePt);
+    if AForceMode >= 0 then
+      mode := AForceMode
+    else if run.Resolution.SyntheticBold then
+      mode := 2
+    else
+      mode := 0;
+    if mode <> lastMode then
+    begin
+      fCurrentPage.SetTextRenderingMode(mode);
+      lastMode := mode;
+    end;
+    if run.Resolution.SyntheticItalic then
+      fCurrentPage.SetTextMatrixUser(1, 0, SYNTHETIC_ITALIC_TAN, 1, penX, ABaselineY)
+    else
+      fCurrentPage.SetTextMatrixUserBaseline(penX, ABaselineY);
+    if run.Resolution.Face.IsStandard then
+      fCurrentPage.ShowTextBytes(run.Codes)
+    else
+      fCurrentPage.ShowTextGlyphs(run.Codes);
+    penX := penX + PtToPx(run.AdvanceEm * ASizePt);
+  end;
+end;
+
 procedure TsmPDF.EmitOneTextLine(const AText: string; X, Y: Double; ASizePt: Double);
 var
-  resolved: TPDFFontResolution;
-  resName: string;
-  ansi: AnsiString;
+  runs: TPDFGlyphRuns;
   sizePt, baselineYPx: Double;
   r, g, b, sr, sg, sb: Double;
   textWidthPx: Double;
   underlineYPx: Double;
   underlineThicknessPt: Double;
   strokeText, emboldened: Boolean;
+  i: Integer;
 begin
   sizePt := ASizePt;
   if sizePt <= 0 then sizePt := 12;
 
-  resolved := ResolveCurrentFont;
-  resName  := fCurrentPage.UseFont(resolved.Face.Key);
+  runs := ShapeText(AText, True);
+  if Length(runs) = 0 then Exit;
 
-  ansi := StringToWinAnsi(AText);
-  if not resolved.Face.IsStandard then
-    RecordWinAnsiGlyphs(resolved.Face, ansi);
-
-  baselineYPx := Y + PtToPx(FontAscentPt(resolved, sizePt));
+  baselineYPx := Y + PtToPx(FontAscentPt(runs[0].Resolution, sizePt));
 
   strokeText := fFont.StrokeStyle <> ssNone;
-  emboldened := resolved.SyntheticBold and not strokeText;
+  emboldened := False;
+  if not strokeText then
+    for i := 0 to High(runs) do
+      emboldened := emboldened or runs[i].Resolution.SyntheticBold;
 
   fCurrentPage.SaveState;
   ColorToRGBFloats(fFont.Color, r, g, b);
@@ -1334,20 +1315,16 @@ begin
     fCurrentPage.SetLineWidthPt(SYNTHETIC_BOLD_EM * sizePt);
   end;
   fCurrentPage.BeginText;
-  fCurrentPage.SetTextFont(resName, sizePt);
-  if strokeText or emboldened then
-    fCurrentPage.SetTextRenderingMode(2);  // fill + stroke each glyph
-  if resolved.SyntheticItalic then
-    fCurrentPage.SetTextMatrixUser(1, 0, SYNTHETIC_ITALIC_TAN, 1, X, baselineYPx)
+  if strokeText then
+    EmitGlyphRuns(runs, X, baselineYPx, sizePt, 2)
   else
-    fCurrentPage.SetTextMatrixUserBaseline(X, baselineYPx);
-  fCurrentPage.ShowTextAnsi(ansi);
+    EmitGlyphRuns(runs, X, baselineYPx, sizePt, -1);
   fCurrentPage.EndText;
   fCurrentPage.RestoreState;
 
-  if fFont.Underline and (Length(ansi) > 0) then
+  if fFont.Underline then
   begin
-    textWidthPx := PtToPx(MeasureWidthPt(resolved, sizePt, ansi));
+    textWidthPx := PtToPx(RunsAdvanceEm(runs) * sizePt);
 
     underlineThicknessPt := 0.05 * sizePt;
     if underlineThicknessPt < 0.5 then underlineThicknessPt := 0.5;
@@ -1431,7 +1408,6 @@ const
   REF_SIZE_PT = 100.0;  // arbitrary; only ratios matter
 var
   resolved: TPDFFontResolution;
-  ansi: AnsiString;
   refWidthPt, refLineHeightPt: Double;
   rectWidthPt, rectHeightPt: Double;
   sizePt: Double;
@@ -1451,11 +1427,10 @@ begin
   if AText = '' then Exit;
 
   resolved := ResolveCurrentFont;
-  ansi     := StringToWinAnsi(AText);
 
   // Pick the largest font size that fits the text inside the rect on both axes
   // while preserving the font's natural width:height ratio.
-  refWidthPt      := MeasureWidthPt(resolved, REF_SIZE_PT, ansi);
+  refWidthPt      := TextWidthPt(AText, REF_SIZE_PT);
   refLineHeightPt := FontLineHeightPt(resolved, REF_SIZE_PT);
   if (refWidthPt <= 0) or (refLineHeightPt <= 0) then Exit;
 
@@ -1463,7 +1438,7 @@ begin
                               rectHeightPt / refLineHeightPt);
   if sizePt <= 0 then Exit;
 
-  textWidthPx  := PtToPx(MeasureWidthPt(resolved, sizePt, ansi));
+  textWidthPx  := PtToPx(TextWidthPt(AText, sizePt));
   lineHeightPx := PtToPx(FontLineHeightPt(resolved, sizePt));
 
   case AAlignment of
@@ -1499,10 +1474,8 @@ end;
 procedure TsmPDF.DrawParagraphInRect(const AText: string; ALeft, ATop, ARight, ABottom: Double;
   AAlignment: TAlignment; APadding: TPDFTextPadding);
 var
-  font: TStandardFont;
-  sizePt, lineHeightPx, maxWidthPt: Double;
+  sizePt, lineHeightPx: Double;
   lines: TStringList;
-  ansi: AnsiString;
   i: Integer;
   lineX, lineY, lineWidthPx: Double;
 begin
@@ -1515,18 +1488,13 @@ begin
   if AText = '' then Exit;
 
   sizePt := EffectiveFontSize;
-
-  font := ResolveStandardFont(fFont.Name, fFont.Bold, fFont.Italics);
-
   lineHeightPx := PtToPx(PaddingMultiplier(APadding) * sizePt);
-  maxWidthPt   := PxToPt(ARight - ALeft);
 
-  lines := WrapTextToLines(AText, font, sizePt, maxWidthPt);
+  lines := WrapLines(AText, sizePt, PxToPt(ARight - ALeft));
   try
     for i := 0 to lines.Count - 1 do
     begin
-      ansi        := StringToWinAnsi(lines[i]);
-      lineWidthPx := PtToPx(StandardFontTextWidth(font, sizePt, ansi));
+      lineWidthPx := PtToPx(TextWidthPt(lines[i], sizePt));
 
       case AAlignment of
         taCenter:
@@ -1554,21 +1522,12 @@ end;
 
 procedure TsmPDF.MeasureTextPx(const AText: string; out AWidthPx, AHeightPx: Double);
 var
-  resolved: TPDFFontResolution;
-  sizePt, widthPt: Double;
+  sizePt: Double;
 begin
   EnsureCurrentPage;
-
-  sizePt   := EffectiveFontSize;
-  resolved := ResolveCurrentFont;
-
-  if AText = '' then
-    widthPt := 0
-  else
-    widthPt := MeasureWidthPt(resolved, sizePt, StringToWinAnsi(AText));
-
-  AWidthPx  := PtToPx(widthPt);
-  AHeightPx := PtToPx(FontLineHeightPt(resolved, sizePt));
+  sizePt    := EffectiveFontSize;
+  AWidthPx  := PtToPx(TextWidthPt(AText, sizePt));
+  AHeightPx := PtToPx(FontLineHeightPt(ResolveCurrentFont, sizePt));
 end;
 
 function TsmPDF.TextExtentF(const AText: string): TSizeF;
@@ -1623,8 +1582,7 @@ end;
 function TsmPDF.MeasureParagraphF(const AText: string; AMaxWidthPx: Double;
   APadding: TPDFTextPadding): TSizeF;
 var
-  font: TStandardFont;
-  sizePt, lineHeightPx, maxWidthPt: Double;
+  sizePt, lineHeightPx: Double;
   lines: TStringList;
   i: Integer;
   lineWidthPx, widestPx: Double;
@@ -1634,22 +1592,16 @@ begin
   if (AText = '') or (AMaxWidthPx <= 0) then Exit;
 
   sizePt := EffectiveFontSize;
-
-  // Mirror DrawParagraph: word-wrap uses the standard-14 font corresponding to
-  // the current Font.Name/Bold/Italics. TTF families fall back here too, so
-  // measurements match what DrawParagraph will actually render.
-  font := ResolveStandardFont(fFont.Name, fFont.Bold, fFont.Italics);
-
   lineHeightPx := PtToPx(PaddingMultiplier(APadding) * sizePt);
-  maxWidthPt   := PxToPt(AMaxWidthPx);
 
-  lines := WrapTextToLines(AText, font, sizePt, maxWidthPt);
+  // Same wrapping and widths as DrawParagraph, so what is measured is drawn.
+  lines := WrapLines(AText, sizePt, PxToPt(AMaxWidthPx));
   try
     if lines.Count = 0 then Exit;
     widestPx := 0;
     for i := 0 to lines.Count - 1 do
     begin
-      lineWidthPx := PtToPx(StandardFontTextWidth(font, sizePt, StringToWinAnsi(lines[i])));
+      lineWidthPx := PtToPx(TextWidthPt(lines[i], sizePt));
       if lineWidthPx > widestPx then widestPx := lineWidthPx;
     end;
     Result := TSizeF.Create(widestPx, lines.Count * lineHeightPx);

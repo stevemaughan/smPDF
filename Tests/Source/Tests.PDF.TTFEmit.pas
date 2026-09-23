@@ -11,13 +11,13 @@ type
     function SavedAsString(const ABuild: TProc<TObject>): string;
     function CountOccurrences(const ASubstring, AString: string): Integer;
   published
-    procedure Test_Arial_emitsTrueTypeSubtype;
+    procedure Test_Arial_emitsType0OverCIDFontType2;
     procedure Test_Arial_emitsFontDescriptor;
     procedure Test_Arial_emitsFontFile2WithLength1;
     procedure Test_Arial_baseFontMatchesPostScriptName;
-    procedure Test_Arial_widthsArrayHas224Entries;
+    procedure Test_Arial_WArrayCoversOnlyUsedGlyphs;
     procedure Test_Arial_fontDescriptorIncludesFontBBox;
-    procedure Test_Arial_fontDescriptorHasNonsymbolicFlag;
+    procedure Test_Arial_fontDescriptorHasSymbolicFlag;
     procedure Test_UnknownFontName_fallsBackToHelvetica;
     procedure Test_MixedTTFAndStandard14_eachGetOwnFontDict;
     procedure Test_ArialBold_resolvesToBoldFile;
@@ -70,7 +70,7 @@ begin
   until found = 0;
 end;
 
-procedure TTTFEmitTests.Test_Arial_emitsTrueTypeSubtype;
+procedure TTTFEmitTests.Test_Arial_emitsType0OverCIDFontType2;
 var s: string;
 begin
   s := SavedAsString(procedure(o: TObject)
@@ -78,7 +78,14 @@ begin
     TsmPDF(o).Font.Name := 'Arial';
     TsmPDF(o).DrawText('Hello', 100, 100);
   end);
-  AssertContains('/Subtype /TrueType', s);
+  AssertContains('/Subtype /Type0', s);
+  AssertContains('/Encoding /Identity-H', s);
+  AssertContains('/Subtype /CIDFontType2', s);
+  AssertContains('/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0>>', s);
+  AssertContains('/CIDToGIDMap /Identity', s);
+  AssertContains('/ToUnicode ', s);
+  AssertEquals(0, Pos('/Subtype /TrueType', s), 'TrueType fonts are no longer simple fonts');
+  AssertEquals(0, Pos('/Widths', s));
 end;
 
 procedure TTTFEmitTests.Test_Arial_emitsFontDescriptor;
@@ -122,38 +129,27 @@ begin
     '/BaseFont should be the subset tag plus the PostScript name');
 end;
 
-procedure TTTFEmitTests.Test_Arial_widthsArrayHas224Entries;
+procedure TTTFEmitTests.Test_Arial_WArrayCoversOnlyUsedGlyphs;
 var
-  s: string;
-  startIdx, endIdx, count, i: Integer;
-  widthsBlock: string;
+  s, w: string;
+  startIdx, endIdx: Integer;
 begin
+  // "Hello" uses four distinct glyphs: H e l o (Arial gids 43, 72, 79, 82).
+  // Widths are Arial's 2048-unit advances in 1/1000 em: H 1479, e/o 1139, l 455.
   s := SavedAsString(procedure(o: TObject)
   begin
     TsmPDF(o).Font.Name := 'Arial';
     TsmPDF(o).DrawText('Hello', 100, 100);
   end);
-  startIdx := Pos('/Widths [', s);
-  AssertTrue(startIdx > 0, '/Widths array present');
-  endIdx := PosEx(']', s, startIdx);
-  AssertTrue(endIdx > startIdx, 'closing ] for /Widths');
-
-  widthsBlock := Copy(s, startIdx + Length('/Widths ['), endIdx - (startIdx + Length('/Widths [')));
-  // Count whitespace-separated numbers
-  count := 0;
-  i := 1;
-  while i <= Length(widthsBlock) do
-  begin
-    while (i <= Length(widthsBlock)) and (widthsBlock[i] = ' ') do Inc(i);
-    if (i <= Length(widthsBlock)) and CharInSet(widthsBlock[i], ['0'..'9', '-']) then
-    begin
-      Inc(count);
-      while (i <= Length(widthsBlock)) and CharInSet(widthsBlock[i], ['0'..'9', '-']) do Inc(i);
-    end
-    else
-      Inc(i);
-  end;
-  AssertEquals(255 - 32 + 1, count, 'expected 224 width entries (FirstChar=32 .. LastChar=255)');
+  AssertContains('/DW 1000', s);
+  startIdx := Pos('/W [', s);
+  AssertTrue(startIdx > 0, '/W array present');
+  endIdx := PosEx(']]', s, startIdx);
+  AssertTrue(endIdx > startIdx, 'closing ]] for /W');
+  w := Copy(s, startIdx, endIdx - startIdx + 2);
+  // Arial advances at 2048 units/em: H 1479, e 1139, l 455, o 1139.
+  AssertEquals('/W [43 [722.168] 72 [556.152] 79 [222.168] 82 [556.152]]', w,
+    'one gid [width] group per run of consecutive glyph ids');
 end;
 
 procedure TTTFEmitTests.Test_Arial_fontDescriptorIncludesFontBBox;
@@ -167,7 +163,7 @@ begin
   AssertContains('/FontBBox [', s);
 end;
 
-procedure TTTFEmitTests.Test_Arial_fontDescriptorHasNonsymbolicFlag;
+procedure TTTFEmitTests.Test_Arial_fontDescriptorHasSymbolicFlag;
 var
   s: string;
   startIdx: Integer;
@@ -190,8 +186,11 @@ begin
     Inc(i);
   end;
   flagsValue := StrToIntDef(flagStr, 0);
-  AssertTrue((flagsValue and 32) <> 0,
-    Format('Nonsymbolic flag (32) should be set in flags=%d', [flagsValue]));
+  // CID fonts are flagged symbolic (bit 3, value 4), not nonsymbolic.
+  AssertTrue((flagsValue and 4) <> 0,
+    Format('Symbolic flag (4) should be set in flags=%d', [flagsValue]));
+  AssertTrue((flagsValue and 32) = 0,
+    Format('Nonsymbolic flag (32) should be clear in flags=%d', [flagsValue]));
 end;
 
 procedure TTTFEmitTests.Test_UnknownFontName_fallsBackToHelvetica;
@@ -203,7 +202,7 @@ begin
     TsmPDF(o).DrawText('Hello', 100, 100);
   end);
   AssertContains('/BaseFont /Helvetica', s);
-  AssertFalse(Pos('/Subtype /TrueType', s) > 0,
+  AssertFalse(Pos('/Subtype /Type0', s) > 0,
     'unknown font should not produce a TrueType embed');
 end;
 
@@ -215,8 +214,8 @@ begin
     TsmPDF(o).Font.Name := 'Helvetica'; TsmPDF(o).DrawText('Std14', 100, 100);
     TsmPDF(o).Font.Name := 'Arial';     TsmPDF(o).DrawText('TTF',   100, 130);
   end);
-  AssertContains('/Subtype /Type1',    s);
-  AssertContains('/Subtype /TrueType', s);
+  AssertContains('/Subtype /Type1', s);
+  AssertContains('/Subtype /Type0', s);
 end;
 
 procedure TTTFEmitTests.Test_ArialBold_resolvesToBoldFile;

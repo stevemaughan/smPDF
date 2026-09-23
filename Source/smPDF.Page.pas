@@ -105,6 +105,8 @@ type
     procedure SetTextMatrixUser(A, B, C, D, XPx, YPxBaseline: Double); // A B C D X Y Tm
     procedure SetTextRenderingMode(AMode: Integer);                 // 0=fill, 1=stroke, 2=fill+stroke, 3=invisible
     procedure ShowTextAnsi(const AAnsiBytes: AnsiString);           // (...) Tj — bytes already WinAnsi
+    procedure ShowTextBytes(const ACodes: array of Word);           // (...) Tj — one byte per code
+    procedure ShowTextGlyphs(const AGlyphs: array of Word);         // <gid gid ...> Tj — Identity-H
 
     // ---------- Clip stack ----------
     // q, rectangle, W n. Every PushClip must be matched by PopClip; any still
@@ -521,6 +523,36 @@ begin
     end;
   end;
   fOut.AppendAscii(') Tj'#10);
+end;
+
+procedure TPDFPage.ShowTextBytes(const ACodes: array of Word);
+var
+  ansi: AnsiString;
+  i: Integer;
+begin
+  SetLength(ansi, Length(ACodes));
+  for i := 0 to High(ACodes) do
+    ansi[i + 1] := AnsiChar(Byte(ACodes[i]));
+  ShowTextAnsi(ansi);
+end;
+
+procedure TPDFPage.ShowTextGlyphs(const AGlyphs: array of Word);
+const
+  HEX: array[0..15] of Byte = (48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 65, 66, 67, 68, 69, 70);
+var
+  i: Integer;
+  g: Word;
+begin
+  fOut.AppendByte(Ord('<'));
+  for i := 0 to High(AGlyphs) do
+  begin
+    g := AGlyphs[i];
+    fOut.AppendByte(HEX[(g shr 12) and $F]);
+    fOut.AppendByte(HEX[(g shr 8) and $F]);
+    fOut.AppendByte(HEX[(g shr 4) and $F]);
+    fOut.AppendByte(HEX[g and $F]);
+  end;
+  fOut.AppendAscii('> Tj'#10);
 end;
 
 // ---------- Object emission ----------

@@ -61,10 +61,34 @@ break source compatibility; they are marked **Breaking**.
   derived from the glyph set. A page of Arial text now carries ~20 KB of font
   data instead of ~1 MB; the Showcase demo drops from 10.3 MB to 0.19 MB. Fonts
   whose `fsType` forbids subsetting are still embedded whole.
+- **Breaking (output): Unicode text through CID fonts.** Every embedded
+  TrueType font is now written as a `Type0` font with `Identity-H` encoding over
+  a `CIDFontType2` (glyph ids as CIDs, `/CIDToGIDMap /Identity`), with a compact
+  `/W` width array and a `ToUnicode` CMap. Text is shown as hex glyph ids.
+  Anything a font's `cmap` maps one-to-one now works: every Latin accent,
+  Greek, Cyrillic, Chinese, Japanese, Korean, precomposed Vietnamese, symbol
+  and private-use glyphs (e.g. Ionicons), including characters beyond U+FFFF
+  (cmap format 12 is read and preferred). Text stays searchable and copyable.
+  Previously TrueType fonts were simple fonts with `/Encoding /WinAnsiEncoding`
+  and a 224-entry `/Widths` array, and anything outside cp1252 became `?`.
+- A character the font cannot show is drawn as its `.notdef` glyph and adds
+  one warning per font and character.
+- **Breaking (output): the 14 standard fonts** still use WinAnsi, but a
+  character outside WinAnsi now becomes `?` with a warning (previously Windows'
+  best-fit conversion could silently change `Ł` to `L`). Use a TrueType font
+  for non-WinAnsi text.
+- Text measurement (`TextWidth`, `TextExtent`, underline length, `DrawText(Rect)`
+  fitting, `DrawParagraph` / `MeasureParagraph`) uses the resolved font's real
+  glyph advances, TrueType included. `DrawParagraph` and `MeasureParagraph`
+  previously wrapped TrueType text using Helvetica widths.
+- `DrawParagraph` also breaks between any two CJK characters (ideographs,
+  kana, Hangul), since those scripts do not use spaces. This is simple
+  wrapping, not the full Unicode line-breaking algorithm.
 
 ### Removed
 
 - `smPDF.WinFonts` (registry-based font lookup), replaced by `smPDF.GdiFonts`.
+- `TTTFFont.CharWidthWinAnsi` (internal): widths come from glyph advances.
 
 ### Added
 

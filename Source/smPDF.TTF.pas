@@ -75,7 +75,6 @@ type
     fLoca:           array of Cardinal;          // glyf offsets, NumGlyphs + 1 entries
     fCmap:           TDictionary<Cardinal, Word>; // codepoint -> glyph index
     fSymbolCmap:     Boolean;                     // cmap came from the (3,0) symbol subtable
-    fWinAnsiWidths:  array[0..255] of Word;       // cached widths in font units
 
     function ReadU16(AOffset: Integer): Word;
     function ReadI16(AOffset: Integer): SmallInt;
@@ -98,7 +97,6 @@ type
     procedure ParseName;
     procedure ParseLoca;
     procedure ComputeFlagsAndStemV;
-    procedure CacheWinAnsiWidths;
   public
     constructor Create(const AFilePath: string);
     constructor CreateFromBytes(const ABytes: TBytes; const ASourceLabel: string = '<bytes>');
@@ -110,7 +108,6 @@ type
 
     function GlyphIndex(ACodepoint: Cardinal): Word;  // 0 if missing
     function GlyphAdvance(AGlyphIndex: Word): Word;   // font units
-    function CharWidthWinAnsi(AByte: Byte): Word;     // font units
 
     // Byte range of a glyph inside the glyf table; False for an empty glyph.
     function GlyphRange(AGlyphIndex: Word; out AOffset, ALength: Cardinal): Boolean;
@@ -283,7 +280,6 @@ begin
   if HasTable('name') then ParseName;
   if HasTrueTypeOutlines then ParseLoca;
   ComputeFlagsAndStemV;
-  CacheWinAnsiWidths;
 end;
 
 procedure TTTFFont.ParseTableDirectory;
@@ -701,41 +697,6 @@ begin
   if fMetrics.StemV < 50 then fMetrics.StemV := 50;
 end;
 
-procedure TTTFFont.CacheWinAnsiWidths;
-var
-  enc: TEncoding;
-  b: Integer;
-  buf: TBytes;
-  s: string;
-  glyph: Word;
-begin
-  enc := TEncoding.GetEncoding(1252);
-  try
-    SetLength(buf, 1);
-    for b := 0 to 255 do
-    begin
-      buf[0] := Byte(b);
-      try
-        s := enc.GetString(buf);
-      except
-        s := '';
-      end;
-      if s = '' then
-      begin
-        fWinAnsiWidths[b] := 0;
-        Continue;
-      end;
-      glyph := GlyphIndex(Ord(s[1]));
-      if glyph = 0 then
-        fWinAnsiWidths[b] := 0
-      else
-        fWinAnsiWidths[b] := fGlyphAdvances[glyph];
-    end;
-  finally
-    enc.Free;
-  end;
-end;
-
 function TTTFFont.GlyphIndex(ACodepoint: Cardinal): Word;
 begin
   if fCmap.TryGetValue(ACodepoint, Result) then Exit;
@@ -750,11 +711,6 @@ begin
     Result := fGlyphAdvances[AGlyphIndex]
   else
     Result := 0;
-end;
-
-function TTTFFont.CharWidthWinAnsi(AByte: Byte): Word;
-begin
-  Result := fWinAnsiWidths[AByte];
 end;
 
 function TTTFFont.GlyphRange(AGlyphIndex: Word; out AOffset, ALength: Cardinal): Boolean;

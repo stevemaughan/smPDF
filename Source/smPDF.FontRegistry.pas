@@ -54,6 +54,15 @@ type
     SyntheticItalic: Boolean;
   end;
 
+  // A stretch of text drawn in one font.
+  TPDFGlyphRun = record
+    Resolution: TPDFFontResolution;
+    // Glyph ids for TrueType faces, WinAnsi bytes for the standard fonts.
+    Codes:      TArray<Word>;
+    AdvanceEm:  Double;          // total advance, in ems
+  end;
+  TPDFGlyphRuns = TArray<TPDFGlyphRun>;
+
   TPDFFontRegistry = class
   strict private
     fWarnings:     TStrings;
@@ -83,7 +92,25 @@ type
 
     // Adds AMessage to the warnings unless it is already there.
     procedure Warn(const AMessage: string);
+
+    // Encode ACount code points starting at AStart in the resolved face. With
+    // ARecord (drawing, not measuring) the glyphs are recorded for embedding
+    // and each character the face cannot show adds one warning.
+    function EncodeRun(const AResolution: TPDFFontResolution; const ACodepoints: TArray<Cardinal>;
+      AStart, ACount: Integer; ARecord: Boolean): TPDFGlyphRun;
+    // True when AFace can show ACodepoint with a real glyph.
+    function FaceHasGlyph(AFace: TPDFFontFace; ACodepoint: Cardinal): Boolean;
   end;
+
+// Code points of a Delphi string: surrogate pairs combined, lone surrogates
+// replaced by U+FFFD, control characters by a space.
+function TextToCodepoints(const AText: string): TArray<Cardinal>;
+
+// Characters that can be broken between when wrapping (CJK ideographs, kana,
+// Hangul and their punctuation), since those scripts do not use spaces.
+function IsCJKCodepoint(ACodepoint: Cardinal): Boolean;
+
+function CodepointToString(ACodepoint: Cardinal): string;
 
 implementation
 
@@ -298,6 +325,132 @@ begin
     end;
   end;
   fCache.Add(key, Result);
+end;
+
+function TextToCodepoints(const AText: string): TArray<Cardinal>;
+var
+  i, n: Integer;
+  c: Char;
+begin
+  SetLength(Result, Length(AText));
+  n := 0;
+  i := 1;
+  while i <= Length(AText) do
+  begin
+    c := AText[i];
+    if (c >= #$D800) and (c <= #$DBFF) and (i < Length(AText)) and
+       (AText[i + 1] >= #$DC00) and (AText[i + 1] <= #$DFFF) then
+    begin
+      Result[n] := $10000 + ((Cardinal(Ord(c)) - $D800) shl 10) + (Cardinal(Ord(AText[i + 1])) - $DC00);
+      Inc(i, 2);
+    end
+    else
+    begin
+      if (c >= #$D800) and (c <= #$DFFF) then
+        Result[n] := $FFFD
+      else if c < ' ' then
+        Result[n] := $20
+      else
+        Result[n] := Ord(c);
+      Inc(i);
+    end;
+    Inc(n);
+  end;
+  SetLength(Result, n);
+end;
+
+function IsCJKCodepoint(ACodepoint: Cardinal): Boolean;
+begin
+  case ACodepoint of
+    $1100..$11FF,    // Hangul Jamo
+    $2E80..$2FDF,    // CJK radicals, Kangxi radicals
+    $3000..$303F,    // CJK symbols and punctuation
+    $3040..$30FF,    // Hiragana, Katakana
+    $3100..$31FF,    // Bopomofo, Hangul compatibility Jamo, Katakana extensions
+    $3200..$33FF,    // Enclosed CJK, CJK compatibility
+    $3400..$4DBF,    // CJK extension A
+    $4E00..$9FFF,    // CJK unified ideographs
+    $A960..$A97F,    // Hangul Jamo extended A
+    $AC00..$D7AF,    // Hangul syllables
+    $F900..$FAFF,    // CJK compatibility ideographs
+    $FF00..$FFEF,    // Halfwidth and fullwidth forms
+    $20000..$3FFFF:  // CJK extensions B onwards
+      Result := True;
+  else
+    Result := False;
+  end;
+end;
+
+function CodepointToString(ACodepoint: Cardinal): string;
+begin
+  if ACodepoint > $FFFF then
+    Result := Char($D800 + ((ACodepoint - $10000) shr 10)) + Char($DC00 + ((ACodepoint - $10000) and $3FF))
+  else
+    Result := Char(ACodepoint);
+end;
+
+function FaceDisplayName(AFace: TPDFFontFace): string;
+begin
+  if AFace.IsStandard then
+    Result := StandardFontPdfName(AFace.StdFont)
+  else if AFace.GdiFamily <> '' then
+    Result := AFace.GdiFamily
+  else
+    Result := AFace.TTF.Metrics.PostScriptName;
+end;
+
+function TPDFFontRegistry.FaceHasGlyph(AFace: TPDFFontFace; ACodepoint: Cardinal): Boolean;
+var
+  b: Byte;
+begin
+  if AFace.IsStandard then
+    Result := UnicodeToWinAnsi(ACodepoint, b)
+  else
+    Result := AFace.TTF.GlyphIndex(ACodepoint) <> 0;
+end;
+
+function TPDFFontRegistry.EncodeRun(const AResolution: TPDFFontResolution;
+  const ACodepoints: TArray<Cardinal>; AStart, ACount: Integer; ARecord: Boolean): TPDFGlyphRun;
+var
+  face: TPDFFontFace;
+  i: Integer;
+  cp: Cardinal;
+  b: Byte;
+  gid: Word;
+  units: Int64;
+begin
+  face := AResolution.Face;
+  Result.Resolution := AResolution;
+  SetLength(Result.Codes, ACount);
+  units := 0;
+  for i := 0 to ACount - 1 do
+  begin
+    cp := ACodepoints[AStart + i];
+    if face.IsStandard then
+    begin
+      if not UnicodeToWinAnsi(cp, b) and ARecord then
+        Warn(Format('%s cannot show U+%.4X (%s): the 14 standard PDF fonts are WinAnsi only, ' +
+          'so it was drawn as "?". Use a TrueType font such as Arial.',
+          [FaceDisplayName(face), cp, CodepointToString(cp)]));
+      Result.Codes[i] := b;
+      Inc(units, StandardFontCharWidth(face.StdFont, b));
+    end
+    else
+    begin
+      gid := face.TTF.GlyphIndex(cp);
+      if (gid = 0) and ARecord then
+        Warn(Format('Font "%s" has no glyph for U+%.4X (%s); it was drawn as the font''s missing-glyph box.',
+          [FaceDisplayName(face), cp, CodepointToString(cp)]));
+      Result.Codes[i] := gid;
+      Inc(units, face.TTF.GlyphAdvance(gid));
+      if ARecord then
+        face.RecordGlyph(gid, cp);
+    end;
+  end;
+  if face.IsStandard then
+    Result.AdvanceEm := units / 1000.0
+  else
+    Result.AdvanceEm := units / face.TTF.Metrics.UnitsPerEm;
 end;
 
 function TPDFFontRegistry.FindFace(const AKey: string; out AFace: TPDFFontFace): Boolean;

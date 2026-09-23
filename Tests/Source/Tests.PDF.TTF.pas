@@ -238,9 +238,9 @@ begin
   try
     glyph          := font.GlyphIndex(Ord('A'));
     widthFromGlyph := font.GlyphAdvance(glyph);
-    widthFromChar  := font.CharWidthWinAnsi(Ord('A'));
+    widthFromChar  := font.GlyphAdvance(font.GlyphIndex($0041));
     AssertEquals(widthFromGlyph, widthFromChar,
-      'CharWidthWinAnsi should return the same value as the glyph advance');
+      'the advance of the glyph mapped from U+0041 is the capital A''s');
     AssertTrue(widthFromChar > 0, 'A has positive width');
   finally
     font.Free;
@@ -252,7 +252,7 @@ var font: TTTFFont;
 begin
   font := TTTFFont.Create(ArialPath);
   try
-    AssertTrue(font.CharWidthWinAnsi(Ord(' ')) > 0, 'space has positive width');
+    AssertTrue(font.GlyphAdvance(font.GlyphIndex(Ord(' '))) > 0, 'space has positive width');
   finally
     font.Free;
   end;
@@ -263,8 +263,8 @@ var font: TTTFFont;
 begin
   font := TTTFFont.Create(ArialPath);
   try
-    // 0x00 in WinAnsi: typically maps to .notdef (glyph 0) -> width 0
-    AssertEquals(0, font.CharWidthWinAnsi(0));
+    // U+0000 is not in the cmap, so it maps to .notdef (glyph 0)
+    AssertEquals(0, Integer(font.GlyphIndex(0)));
   finally
     font.Free;
   end;
@@ -289,11 +289,11 @@ var
 begin
   font := TTTFFont.Create(CourierNewPath);
   try
-    refWidth := font.CharWidthWinAnsi(Ord('A'));
+    refWidth := font.GlyphAdvance(font.GlyphIndex(Ord('A')));
     AssertTrue(refWidth > 0);
     for b := Ord('A') to Ord('Z') do
     begin
-      w := font.CharWidthWinAnsi(b);
+      w := font.GlyphAdvance(font.GlyphIndex(b));
       AssertEquals(refWidth, w,
         Format('Courier New should be monospaced; byte %d width %d != %d', [b, w, refWidth]));
     end;

@@ -70,7 +70,7 @@ type
 implementation
 
 uses
-  Math, Diagnostics, RTTI, TypInfo, IOUtils;
+  Math, Diagnostics, RTTI, TypInfo, IOUtils, Winapi.Windows;
 
 { TTestCase }
 
@@ -300,6 +300,7 @@ var
   r: TTestResult;
   failures, errors, skipped, total: Integer;
   totalSecs: Double;
+  attempt: Integer;
 
   function Esc(const S: string): string;
   begin
@@ -352,7 +353,15 @@ begin
       end;
     end;
     sb.AppendLine('</testsuite>');
-    TFile.WriteAllText(AFileName, sb.ToString, TEncoding.UTF8);
+    // The output folder lives in Dropbox, which can hold the file briefly.
+    for attempt := 1 to 5 do
+      try
+        TFile.WriteAllText(AFileName, sb.ToString, TEncoding.UTF8);
+        Break;
+      except
+        on EInOutError do
+          if attempt = 5 then raise else Sleep(500);
+      end;
   finally
     sb.Free;
   end;

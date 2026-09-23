@@ -25,10 +25,18 @@ function CountSubstring(const ASubstring, AString: string): Integer;
 // Integer value of "/Key N" inside a dictionary string, or -1.
 function DictInt(const ADict, AKey: string): Integer;
 
+// Full path of mutool.exe when it is on the PATH, else ''.
+function MutoolPath: string;
+// Extract the text of every page with "mutool draw -F txt". False when mutool
+// is not available or fails. Runs of whitespace are collapsed to one space.
+function MutoolExtractText(const APdfBytes: TBytes; out AText: string): Boolean;
+// Render every page with mutool and report anything it printed to stderr.
+function MutoolRenderWarnings(const APdfBytes: TBytes; out AWarnings: string): Boolean;
+
 implementation
 
 uses
-  StrUtils, System.ZLib;
+  StrUtils, IOUtils, System.ZLib, Winapi.Windows, RegularExpressions;
 
 function PdfBytesToString(const ABytes: TBytes): string;
 var
@@ -137,6 +145,89 @@ begin
     Result := list.ToArray;
   finally
     list.Free;
+  end;
+end;
+
+function MutoolPath: string;
+var
+  buf: array[0..MAX_PATH] of Char;
+  filePart: PChar;
+begin
+  if SearchPath(nil, 'mutool.exe', nil, Length(buf), @buf[0], filePart) > 0 then
+    Result := buf
+  else
+    Result := '';
+end;
+
+function RunHidden(const ACommandLine: string; out AExitCode: Cardinal): Boolean;
+var
+  si: TStartupInfo;
+  pi: TProcessInformation;
+  cmd: string;
+begin
+  FillChar(si, SizeOf(si), 0);
+  si.cb := SizeOf(si);
+  si.dwFlags := STARTF_USESHOWWINDOW;
+  si.wShowWindow := SW_HIDE;
+  cmd := ACommandLine;
+  UniqueString(cmd);
+  Result := CreateProcess(nil, PChar(cmd), nil, nil, False, CREATE_NO_WINDOW, nil, nil, si, pi);
+  if not Result then Exit;
+  try
+    WaitForSingleObject(pi.hProcess, 60000);
+    GetExitCodeProcess(pi.hProcess, AExitCode);
+  finally
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+  end;
+end;
+
+function MutoolExtractText(const APdfBytes: TBytes; out AText: string): Boolean;
+var
+  tool, pdfFile, txtFile: string;
+  code: Cardinal;
+begin
+  AText := '';
+  tool := MutoolPath;
+  if tool = '' then Exit(False);
+  pdfFile := TPath.Combine(TPath.GetTempPath, 'smPDF-mutool-' + IntToStr(GetCurrentThreadId) + '.pdf');
+  txtFile := ChangeFileExt(pdfFile, '.txt');
+  TFile.WriteAllBytes(pdfFile, APdfBytes);
+  try
+    if TFile.Exists(txtFile) then TFile.Delete(txtFile);
+    Result := RunHidden(Format('"%s" draw -q -F txt -o "%s" "%s"', [tool, txtFile, pdfFile]), code)
+      and (code = 0) and TFile.Exists(txtFile);
+    if Result then
+      AText := Trim(TRegEx.Replace(TFile.ReadAllText(txtFile, TEncoding.UTF8), '\s+', ' '));
+  finally
+    if TFile.Exists(pdfFile) then TFile.Delete(pdfFile);
+    if TFile.Exists(txtFile) then TFile.Delete(txtFile);
+  end;
+end;
+
+function MutoolRenderWarnings(const APdfBytes: TBytes; out AWarnings: string): Boolean;
+var
+  tool, pdfFile, outFile, logFile: string;
+  code: Cardinal;
+begin
+  AWarnings := '';
+  tool := MutoolPath;
+  if tool = '' then Exit(False);
+  pdfFile := TPath.Combine(TPath.GetTempPath, 'smPDF-render-' + IntToStr(GetCurrentThreadId) + '.pdf');
+  outFile := ChangeFileExt(pdfFile, '.pgm');
+  logFile := ChangeFileExt(pdfFile, '.log');
+  TFile.WriteAllBytes(pdfFile, APdfBytes);
+  try
+    Result := RunHidden(Format('cmd /c ""%s" draw -q -r 20 -o "%s" "%s" 2> "%s""',
+      [tool, outFile, pdfFile, logFile]), code);
+    if Result and TFile.Exists(logFile) then
+      AWarnings := Trim(TFile.ReadAllText(logFile));
+    if code <> 0 then
+      AWarnings := Trim(AWarnings + ' (exit ' + IntToStr(code) + ')');
+  finally
+    if TFile.Exists(pdfFile) then TFile.Delete(pdfFile);
+    if TFile.Exists(outFile) then TFile.Delete(outFile);
+    if TFile.Exists(logFile) then TFile.Delete(logFile);
   end;
 end;
 
