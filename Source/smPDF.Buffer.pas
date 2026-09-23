@@ -19,6 +19,8 @@ type
     constructor Create(AInitialCapacity: NativeInt = 4096);
 
     procedure Clear;
+    // Shrink back to ASize bytes (ASize <= Size); capacity is kept.
+    procedure Truncate(ASize: NativeInt);
     procedure AppendByte(AByte: Byte); inline;
     procedure AppendBytes(AData: Pointer; ACount: NativeInt);
     // Characters must be < 256 (content streams are 8-bit).
@@ -52,6 +54,12 @@ end;
 procedure TPDFByteBuffer.Clear;
 begin
   fSize := 0;
+end;
+
+procedure TPDFByteBuffer.Truncate(ASize: NativeInt);
+begin
+  if (ASize >= 0) and (ASize < fSize) then
+    fSize := ASize;
 end;
 
 procedure TPDFByteBuffer.Grow(AMinCapacity: NativeInt);

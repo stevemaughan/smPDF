@@ -54,7 +54,7 @@ var
 begin
   a := Pos('stream'#10, APdf);
   b := PosEx(#10'endstream', APdf, a);
-  Result := Copy(APdf, a + 7, b - a - 6);
+  Result := Copy(APdf, a + 7, b - a - 7);
 end;
 
 function SquareWithHole: TArray<TPointF>;

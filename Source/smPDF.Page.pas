@@ -13,6 +13,9 @@ type
     fDpi:           Integer;
     fScale:         Double;                       // points per pixel = 72 / DPI
     fContent:       TPDFByteBuffer;
+    fPathContent:   TPDFByteBuffer;               // path operators captured between BeginPathCapture/EndPathCapture
+    fOut:           TPDFByteBuffer;               // where operators are written: fContent or fPathContent
+    fClipDepth:     Integer;
     fFontMap:       TDictionary<string, string>;  // PDF font name -> page-local resource name (F1, F2, ...)
     fFontOrder:     TList<string>;                // insertion order for stable iteration
     fImageMap:      TDictionary<string, string>;  // image key -> page-local name (Im1, Im2, ...)
@@ -102,11 +105,26 @@ type
     procedure SetTextRenderingMode(AMode: Integer);                 // 0=fill, 1=stroke, 2=fill+stroke, 3=invisible
     procedure ShowTextAnsi(const AAnsiBytes: AnsiString);           // (...) Tj — bytes already WinAnsi
 
+    // ---------- Clip stack ----------
+    // q, rectangle, W n. Every PushClip must be matched by PopClip; any still
+    // open when the page is written are closed there so q/Q always balance.
+    procedure PushClip(X1Px, Y1Px, X2Px, Y2Px: Double);
+    procedure PopClip;
+
+    // ---------- Deferred paths ----------
+    // Between these calls, operators go to a side buffer instead of the page,
+    // so the graphics state for painting can be written before the path.
+    procedure BeginPathCapture;
+    procedure EndPathCapture;
+    procedure AppendCapturedPath;
+    function  CapturedPathSize: Integer;
+
     function ContentStreamSize: Integer;
 
     property WidthPixels:   Integer read GetWidthPixels;
     property HeightPixels:  Integer read GetHeightPixels;
     property Dpi:           Integer read fDpi;
+    property ClipDepth:     Integer read fClipDepth;
   end;
 
 implementation
@@ -127,6 +145,9 @@ begin
   fDpi           := ADpi;
   fScale         := POINTS_PER_INCH / ADpi;
   fContent       := TPDFByteBuffer.Create;
+  fPathContent   := nil;
+  fOut           := fContent;
+  fClipDepth     := 0;
   fFontMap       := TDictionary<string, string>.Create;
   fFontOrder     := TList<string>.Create;
   fImageMap      := TDictionary<string, string>.Create;
@@ -139,6 +160,7 @@ begin
   fImageMap.Free;
   fFontOrder.Free;
   fFontMap.Free;
+  fPathContent.Free;
   fContent.Free;
   inherited;
 end;
@@ -223,9 +245,51 @@ begin
   Result := fContent.Size;
 end;
 
+procedure TPDFPage.PushClip(X1Px, Y1Px, X2Px, Y2Px: Double);
+begin
+  SaveState;
+  UserRectanglePath(X1Px, Y1Px, X2Px, Y2Px);
+  WriteRaw('W n'#10);
+  Inc(fClipDepth);
+end;
+
+procedure TPDFPage.PopClip;
+begin
+  if fClipDepth <= 0 then
+    raise EInvalidOpException.Create('PopClip without a matching PushClip');
+  RestoreState;
+  Dec(fClipDepth);
+end;
+
+procedure TPDFPage.BeginPathCapture;
+begin
+  if fPathContent = nil then
+    fPathContent := TPDFByteBuffer.Create;
+  fPathContent.Clear;
+  fOut := fPathContent;
+end;
+
+procedure TPDFPage.EndPathCapture;
+begin
+  fOut := fContent;
+end;
+
+procedure TPDFPage.AppendCapturedPath;
+begin
+  fContent.AppendBuffer(fPathContent);
+end;
+
+function TPDFPage.CapturedPathSize: Integer;
+begin
+  if fPathContent = nil then
+    Result := 0
+  else
+    Result := fPathContent.Size;
+end;
+
 procedure TPDFPage.WriteRaw(const AStr: string);
 begin
-  fContent.AppendAscii(AStr);
+  fOut.AppendAscii(AStr);
 end;
 
 procedure TPDFPage.WriteOp(const AOperator: string; const AOperands: array of Double);
@@ -234,11 +298,11 @@ var
 begin
   for i := 0 to High(AOperands) do
   begin
-    fContent.AppendNumber(AOperands[i]);
-    fContent.AppendByte(Ord(' '));
+    fOut.AppendNumber(AOperands[i]);
+    fOut.AppendByte(Ord(' '));
   end;
-  fContent.AppendAscii(AOperator);
-  fContent.AppendByte(10);
+  fOut.AppendAscii(AOperator);
+  fOut.AppendByte(10);
 end;
 
 // ---------- Graphics state ----------
@@ -272,27 +336,27 @@ procedure TPDFPage.SetDashPattern(const APattern: array of Double; APhase: Doubl
 var
   i: Integer;
 begin
-  fContent.AppendByte(Ord('['));
+  fOut.AppendByte(Ord('['));
   for i := 0 to High(APattern) do
   begin
-    if i > 0 then fContent.AppendByte(Ord(' '));
-    fContent.AppendNumber(APattern[i]);
+    if i > 0 then fOut.AppendByte(Ord(' '));
+    fOut.AppendNumber(APattern[i]);
   end;
-  fContent.AppendAscii('] ');
-  fContent.AppendNumber(APhase);
-  fContent.AppendAscii(' d'#10);
+  fOut.AppendAscii('] ');
+  fOut.AppendNumber(APhase);
+  fOut.AppendAscii(' d'#10);
 end;
 
 procedure TPDFPage.SetLineCap(ACap: Integer);
 begin
-  fContent.AppendInt(ACap);
-  fContent.AppendAscii(' J'#10);
+  fOut.AppendInt(ACap);
+  fOut.AppendAscii(' J'#10);
 end;
 
 procedure TPDFPage.SetLineJoin(AJoin: Integer);
 begin
-  fContent.AppendInt(AJoin);
-  fContent.AppendAscii(' j'#10);
+  fOut.AppendInt(AJoin);
+  fOut.AppendAscii(' j'#10);
 end;
 
 procedure TPDFPage.ConcatMatrix(A, B, C, D, E, F: Double);
@@ -304,12 +368,12 @@ end;
 
 procedure TPDFPage.UserMoveTo(XPx, YPx: Double);
 begin
-  fContent.AppendPointOp(PdfX(XPx), PdfY(YPx), 'm');
+  fOut.AppendPointOp(PdfX(XPx), PdfY(YPx), 'm');
 end;
 
 procedure TPDFPage.UserLineTo(XPx, YPx: Double);
 begin
-  fContent.AppendPointOp(PdfX(XPx), PdfY(YPx), 'l');
+  fOut.AppendPointOp(PdfX(XPx), PdfY(YPx), 'l');
 end;
 
 procedure TPDFPage.UserCurveTo(X1Px, Y1Px, X2Px, Y2Px, X3Px, Y3Px: Double);
@@ -410,11 +474,11 @@ end;
 
 procedure TPDFPage.SetTextFont(const AResourceName: string; ASizePoints: Double);
 begin
-  fContent.AppendByte(Ord('/'));
-  fContent.AppendAscii(AResourceName);
-  fContent.AppendByte(Ord(' '));
-  fContent.AppendNumber(ASizePoints);
-  fContent.AppendAscii(' Tf'#10);
+  fOut.AppendByte(Ord('/'));
+  fOut.AppendAscii(AResourceName);
+  fOut.AppendByte(Ord(' '));
+  fOut.AppendNumber(ASizePoints);
+  fOut.AppendAscii(' Tf'#10);
 end;
 
 procedure TPDFPage.SetTextMatrixUserBaseline(XPx, YPxBaseline: Double);
@@ -424,8 +488,8 @@ end;
 
 procedure TPDFPage.SetTextRenderingMode(AMode: Integer);
 begin
-  fContent.AppendInt(AMode);
-  fContent.AppendAscii(' Tr'#10);
+  fOut.AppendInt(AMode);
+  fOut.AppendAscii(' Tr'#10);
 end;
 
 procedure TPDFPage.ShowTextAnsi(const AAnsiBytes: AnsiString);
@@ -433,24 +497,24 @@ var
   i: Integer;
   c: AnsiChar;
 begin
-  fContent.AppendByte(Ord('('));
+  fOut.AppendByte(Ord('('));
   for i := 1 to Length(AAnsiBytes) do
   begin
     c := AAnsiBytes[i];
     case c of
-      '(': fContent.AppendAscii('\(');
-      ')': fContent.AppendAscii('\)');
-      '\': fContent.AppendAscii('\\');
-      #10: fContent.AppendAscii('\n');
-      #13: fContent.AppendAscii('\r');
-      #9:  fContent.AppendAscii('\t');
-      #8:  fContent.AppendAscii('\b');
-      #12: fContent.AppendAscii('\f');
+      '(': fOut.AppendAscii('\(');
+      ')': fOut.AppendAscii('\)');
+      '\': fOut.AppendAscii('\\');
+      #10: fOut.AppendAscii('\n');
+      #13: fOut.AppendAscii('\r');
+      #9:  fOut.AppendAscii('\t');
+      #8:  fOut.AppendAscii('\b');
+      #12: fOut.AppendAscii('\f');
     else
-      fContent.AppendByte(Ord(c));
+      fOut.AppendByte(Ord(c));
     end;
   end;
-  fContent.AppendAscii(') Tj'#10);
+  fOut.AppendAscii(') Tj'#10);
 end;
 
 // ---------- Object emission ----------
@@ -465,7 +529,15 @@ var
   fontName, imageKey: string;
   fontObjId, imageObjId: TPDFObjectId;
   hasFonts, hasImages: Boolean;
+  userSize: NativeInt;
+  i: Integer;
 begin
+  // Close clips left open by the caller, without changing the page: the
+  // Q operators are appended only for the duration of this write.
+  userSize := fContent.Size;
+  for i := 1 to fClipDepth do
+    fContent.AppendAscii('Q'#10);
+  try
   if ACompress then
   begin
     packed_ := FlateCompress(fContent.Memory, fContent.Size);
@@ -478,6 +550,9 @@ begin
   end
   else
     contentId := AWriter.EmitStreamObject(fContent.Memory, fContent.Size, nil);
+  finally
+    fContent.Truncate(userSize);
+  end;
 
   hasFonts  := (AFontIds  <> nil) and (fFontOrder.Count  > 0);
   hasImages := (AImageIds <> nil) and (fImageOrder.Count > 0);

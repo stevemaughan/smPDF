@@ -123,9 +123,14 @@ type
     fTTFFonts:          TObjectDictionary<string, TTTFFont>;  // PostScript name -> font
     fImageData:         TDictionary<string, TPDFImageData>;   // image key -> extracted data
     fImageKeyByPicture: TDictionary<TObject, string>;         // TPicture pointer -> key (for dedup)
+    fPathOpen:          Boolean;
+    fPathHasPoint:      Boolean;
 
     procedure StartPage(AWidthPt, AHeightPt: Double; ADPI: Integer; APaperColor: TColor);
     procedure EnsureCurrentPage;
+    procedure EnsureCanDraw;
+    procedure EnsurePathOpen(const AMethod: string);
+    procedure FinishPath(ADoFill, ADoStroke: Boolean; AFillRule: TPDFFillRule);
     function  PxToPt(APixels: Double): Double; inline;
     function  PtToPx(APoints: Double): Double; inline;
     function  EffectiveFontSize: Double;
@@ -231,6 +236,27 @@ type
     // Strokes the first ACount points (all of them when ACount = -1) as one
     // open path with the current Pen.
     procedure DrawPolyline(const APoints: array of TPointF; ACount: Integer = -1); overload;
+
+    // Clip everything drawn afterwards to R (intersected with any clip already
+    // pushed) until the matching PopClip. Clips still open are closed
+    // automatically when the page is written.
+    procedure PushClipRect(const R: TRectF); overload;
+    procedure PushClipRect(const R: TRect); overload;
+    procedure PopClip;
+
+    // General paths in page pixels, painted with the current Pen / Brush.
+    // Between BeginPath and a Fill/Stroke call no other drawing, clipping or
+    // NewPage is allowed.
+    procedure BeginPath;
+    procedure MoveTo(X, Y: Double);
+    procedure LineTo(X, Y: Double);
+    procedure CurveTo(X1, Y1, X2, Y2, X3, Y3: Double);
+    procedure ClosePath;
+    procedure FillPath(AFillRule: TPDFFillRule = frNonZero);
+    procedure StrokePath;
+    procedure FillAndStrokePath(AFillRule: TPDFFillRule = frNonZero);
+    // A zero radius draws exactly what DrawBox draws.
+    procedure DrawRoundRect(const R: TRectF; ARadiusX, ARadiusY: Double);
 
     procedure DrawPicture(const APicture: TPicture; ARect: TRect;
       AAlignment: TAlignment = taLeftJustify; AStretch: Boolean = False); overload;
@@ -575,6 +601,8 @@ procedure TsmPDF.NewPage(const APaperSize: TPDFPaperSize; const AOrientation: TP
 var
   widthPt, heightPt, tmp: Double;
 begin
+  if fPathOpen then
+    raise EPDFError.Create('NewPage: a path is open. Finish it first.');
   if ADPI <= 0 then
     raise EPDFError.Create('NewPage: ADPI must be positive');
 
@@ -603,6 +631,8 @@ end;
 procedure TsmPDF.NewPage(const AWidthPt, AHeightPt: Double; const ADPI: Integer;
   const APaperColor: TColor);
 begin
+  if fPathOpen then
+    raise EPDFError.Create('NewPage: a path is open. Finish it first.');
   if ADPI <= 0 then
     raise EPDFError.Create('NewPage: ADPI must be positive');
   if (AWidthPt <= 0) or (AHeightPt <= 0) then
@@ -622,6 +652,8 @@ begin
   // Second-and-later pages: inherit the previous page's settings so that a
   // multi-page document with non-default paper/orientation/DPI/colour doesn't
   // need to repeat the full NewPage signature for every page.
+  if fPathOpen then
+    raise EPDFError.Create('NewPage: a path is open. Finish it first.');
   if fCurrentPage = nil then
     NewPage(psA4, poPortrait, 300)
   else
@@ -632,6 +664,20 @@ procedure TsmPDF.EnsureCurrentPage;
 begin
   if fCurrentPage = nil then
     raise EPDFError.Create('No active page. Call NewPage before drawing.');
+end;
+
+procedure TsmPDF.EnsureCanDraw;
+begin
+  EnsureCurrentPage;
+  if fPathOpen then
+    raise EPDFError.Create('A path is open. Finish it with FillPath, StrokePath or ' +
+      'FillAndStrokePath before drawing anything else.');
+end;
+
+procedure TsmPDF.EnsurePathOpen(const AMethod: string);
+begin
+  if not fPathOpen then
+    raise EPDFError.Create(AMethod + ' needs an open path. Call BeginPath first.');
 end;
 
 procedure TsmPDF.WriteDocument(AWriter: TPDFWriter);
@@ -760,6 +806,8 @@ begin
     raise EPDFError.Create('Cannot save: stream is nil.');
   if fPages.Count = 0 then
     raise EPDFError.Create('Cannot save: no pages added. Call NewPage first.');
+  if fPathOpen then
+    raise EPDFError.Create('Cannot save: a path is open. Finish it first.');
   writer := TPDFWriter.Create(AStream);
   try
     WriteDocument(writer);
@@ -1030,7 +1078,7 @@ var
   key, res: string;
   data: TPDFImageData;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if (APicture = nil) or (APicture.Graphic = nil) then Exit;
 
   key := GetOrAddImage(APicture);
@@ -1047,7 +1095,7 @@ var
   data: TPDFImageData;
   x1, y1, x2, y2: Double;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if (APicture = nil) or (APicture.Graphic = nil) then Exit;
 
   key := GetOrAddImage(APicture);
@@ -1086,7 +1134,7 @@ begin
   // Integer rects keep the 1.x whole-pixel centring.
   if (not AStretch) and (AAlignment = taCenter) and (APicture <> nil) and (APicture.Graphic <> nil) then
   begin
-    EnsureCurrentPage;
+    EnsureCanDraw;
     left := ARect.Left + (ARect.Right - ARect.Left - fImageData[GetOrAddImage(APicture)].Width) div 2;
     DrawPictureInRect(APicture, left, ARect.Top, left + (ARect.Right - ARect.Left), ARect.Bottom,
       taLeftJustify, False);
@@ -1324,7 +1372,7 @@ var
   pivotX, pivotY: Double;
   cm_e, cm_f: Double;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if AText = '' then Exit;
 
   // Wrap the rest in q ... cm ... Q so the Brush background, the text, the
@@ -1382,7 +1430,7 @@ var
   textWidthPx, lineHeightPx: Double;
   x, y: Double;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
 
   rectWidthPt  := PxToPt(ARight - ALeft);
   rectHeightPt := PxToPt(ABottom - ATop);
@@ -1450,7 +1498,7 @@ var
   i: Integer;
   lineX, lineY, lineWidthPx: Double;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
 
   // Single rect-sized background fill for the whole paragraph (not per-line).
   if (ARight > ALeft) and (ABottom > ATop) then
@@ -1613,7 +1661,7 @@ end;
 
 procedure TsmPDF.DrawLine(const x1, y1, x2, y2: Double);
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if fPen.Style = penNone then Exit;  // lines have no fill; nothing to draw
 
   fCurrentPage.SaveState;
@@ -1631,7 +1679,7 @@ end;
 
 procedure TsmPDF.DrawBox(const x1, y1, x2, y2: Double);
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
@@ -1648,7 +1696,7 @@ end;
 
 procedure TsmPDF.DrawOval(const x1, y1, x2, y2: Double);
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
   fCurrentPage.SaveState;
@@ -1662,7 +1710,7 @@ procedure TsmPDF.DrawMultiLine(const APointList: TPDFPointList);
 var
   i: Integer;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if APointList.Count < 2 then Exit;
   if fPen.Style = penNone then Exit;  // open polylines have no fill
 
@@ -1679,7 +1727,7 @@ procedure TsmPDF.DrawMultiLine(const APointList: TPDFPointFList);
 var
   i: Integer;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if APointList.Count < 2 then Exit;
   if fPen.Style = penNone then Exit;
 
@@ -1694,7 +1742,7 @@ end;
 
 procedure TsmPDF.DrawPolygon(const APointList: TPDFPointList);
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if APointList.Count < 2 then Exit;
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
@@ -1707,7 +1755,7 @@ end;
 
 procedure TsmPDF.DrawPolygon(const APointList: TPDFPointFList);
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if APointList.Count < 2 then Exit;
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
@@ -1720,7 +1768,7 @@ end;
 
 procedure TsmPDF.DrawPolygon(const APointList: TPDFPointList; AClipRect: TRect);
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if APointList.Count < 2 then Exit;
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
@@ -1734,7 +1782,7 @@ end;
 
 procedure TsmPDF.DrawPolygon(const APointList: TPDFPointFList; AClipRect: TRectF);
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if APointList.Count < 2 then Exit;
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
@@ -1751,7 +1799,7 @@ procedure TsmPDF.DrawPolyPolygon(const APoints: array of TPointF; const ACounts:
 var
   part, i, first, n: Integer;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   CheckPartCounts(ACounts, Length(APoints));
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
@@ -1779,7 +1827,7 @@ procedure TsmPDF.DrawPolyPolygon(const APoints: array of TPoint; const ACounts: 
 var
   part, i, first, n: Integer;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   CheckPartCounts(ACounts, Length(APoints));
   if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
 
@@ -1806,7 +1854,7 @@ procedure TsmPDF.DrawPolyline(const APoints: array of TPointF; ACount: Integer);
 var
   i, n: Integer;
 begin
-  EnsureCurrentPage;
+  EnsureCanDraw;
   if ACount < 0 then
     n := Length(APoints)
   else
@@ -1825,6 +1873,163 @@ begin
   for i := 1 to n - 1 do
     fCurrentPage.UserLineTo(APoints[i].X, APoints[i].Y);
   fCurrentPage.Stroke;
+  fCurrentPage.RestoreState;
+end;
+
+// ------------------------------------------------------------------
+// Clip stack
+// ------------------------------------------------------------------
+
+procedure TsmPDF.PushClipRect(const R: TRectF);
+begin
+  EnsureCanDraw;
+  fCurrentPage.PushClip(R.Left, R.Top, R.Right, R.Bottom);
+end;
+
+procedure TsmPDF.PushClipRect(const R: TRect);
+begin
+  EnsureCanDraw;
+  fCurrentPage.PushClip(R.Left, R.Top, R.Right, R.Bottom);
+end;
+
+procedure TsmPDF.PopClip;
+begin
+  EnsureCanDraw;
+  if fCurrentPage.ClipDepth = 0 then
+    raise EPDFError.Create('PopClip without a matching PushClipRect on this page.');
+  fCurrentPage.PopClip;
+end;
+
+// ------------------------------------------------------------------
+// Path API
+// ------------------------------------------------------------------
+
+procedure TsmPDF.BeginPath;
+begin
+  EnsureCanDraw;
+  fCurrentPage.BeginPathCapture;
+  fPathOpen     := True;
+  fPathHasPoint := False;
+end;
+
+procedure TsmPDF.MoveTo(X, Y: Double);
+begin
+  EnsurePathOpen('MoveTo');
+  fCurrentPage.UserMoveTo(X, Y);
+  fPathHasPoint := True;
+end;
+
+procedure TsmPDF.LineTo(X, Y: Double);
+begin
+  EnsurePathOpen('LineTo');
+  if not fPathHasPoint then
+    raise EPDFError.Create('LineTo needs a current point. Call MoveTo first.');
+  fCurrentPage.UserLineTo(X, Y);
+end;
+
+procedure TsmPDF.CurveTo(X1, Y1, X2, Y2, X3, Y3: Double);
+begin
+  EnsurePathOpen('CurveTo');
+  if not fPathHasPoint then
+    raise EPDFError.Create('CurveTo needs a current point. Call MoveTo first.');
+  fCurrentPage.UserCurveTo(X1, Y1, X2, Y2, X3, Y3);
+end;
+
+procedure TsmPDF.ClosePath;
+begin
+  EnsurePathOpen('ClosePath');
+  if fPathHasPoint then
+    fCurrentPage.ClosePath;
+end;
+
+procedure TsmPDF.FinishPath(ADoFill, ADoStroke: Boolean; AFillRule: TPDFFillRule);
+var
+  r, g, b: Double;
+begin
+  fCurrentPage.EndPathCapture;
+  fPathOpen := False;
+
+  ADoFill   := ADoFill   and (fBrush.Style = brushSolid);
+  ADoStroke := ADoStroke and (fPen.Style <> penNone);
+  if (fCurrentPage.CapturedPathSize = 0) or not (ADoFill or ADoStroke) then Exit;
+
+  fCurrentPage.SaveState;
+  if ADoStroke then
+    ApplyStrokeState(fCurrentPage, fPen);
+  if ADoFill then
+  begin
+    ColorToRGBFloats(fBrush.Color, r, g, b);
+    fCurrentPage.SetFillRGB(r, g, b);
+  end;
+  fCurrentPage.AppendCapturedPath;
+  if ADoFill and ADoStroke then
+  begin
+    if AFillRule = frEvenOdd then fCurrentPage.FillAndStrokeEvenOdd
+    else fCurrentPage.FillAndStrokeNonZero;
+  end
+  else if ADoFill then
+  begin
+    if AFillRule = frEvenOdd then fCurrentPage.FillEvenOdd
+    else fCurrentPage.FillNonZero;
+  end
+  else
+    fCurrentPage.Stroke;
+  fCurrentPage.RestoreState;
+end;
+
+procedure TsmPDF.FillPath(AFillRule: TPDFFillRule);
+begin
+  EnsurePathOpen('FillPath');
+  FinishPath(True, False, AFillRule);
+end;
+
+procedure TsmPDF.StrokePath;
+begin
+  EnsurePathOpen('StrokePath');
+  FinishPath(False, True, frNonZero);
+end;
+
+procedure TsmPDF.FillAndStrokePath(AFillRule: TPDFFillRule);
+begin
+  EnsurePathOpen('FillAndStrokePath');
+  FinishPath(True, True, AFillRule);
+end;
+
+procedure TsmPDF.DrawRoundRect(const R: TRectF; ARadiusX, ARadiusY: Double);
+const
+  KAPPA = 0.5522847498307933;  // same quarter-circle constant as UserOvalPath
+var
+  l, t, rt, b, rx, ry, kx, ky: Double;
+begin
+  EnsureCanDraw;
+  l  := Min(R.Left, R.Right);
+  rt := Max(R.Left, R.Right);
+  t  := Min(R.Top, R.Bottom);
+  b  := Max(R.Top, R.Bottom);
+  rx := Min(Abs(ARadiusX), (rt - l) / 2);
+  ry := Min(Abs(ARadiusY), (b - t) / 2);
+  if (rx <= 0) or (ry <= 0) then
+  begin
+    DrawBox(R.Left, R.Top, R.Right, R.Bottom);
+    Exit;
+  end;
+  if (fPen.Style = penNone) and (fBrush.Style = brushClear) then Exit;
+
+  kx := KAPPA * rx;
+  ky := KAPPA * ry;
+  fCurrentPage.SaveState;
+  ApplyStrokeAndFillState(fCurrentPage, fPen, fBrush);
+  fCurrentPage.UserMoveTo(l + rx, t);
+  fCurrentPage.UserLineTo(rt - rx, t);
+  fCurrentPage.UserCurveTo(rt - rx + kx, t, rt, t + ry - ky, rt, t + ry);
+  fCurrentPage.UserLineTo(rt, b - ry);
+  fCurrentPage.UserCurveTo(rt, b - ry + ky, rt - rx + kx, b, rt - rx, b);
+  fCurrentPage.UserLineTo(l + rx, b);
+  fCurrentPage.UserCurveTo(l + rx - kx, b, l, b - ry + ky, l, b - ry);
+  fCurrentPage.UserLineTo(l, t + ry);
+  fCurrentPage.UserCurveTo(l, t + ry - ky, l + rx - kx, t, l + rx, t);
+  fCurrentPage.ClosePath;
+  PaintByPenAndBrush(fCurrentPage, fPen, fBrush);
   fCurrentPage.RestoreState;
 end;
 

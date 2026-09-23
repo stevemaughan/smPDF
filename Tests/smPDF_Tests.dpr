@@ -20,7 +20,8 @@ uses
   Tests.PDF.Integration in 'Source\Tests.PDF.Integration.pas',
   Tests.PDF.Compression in 'Source\Tests.PDF.Compression.pas',
   Tests.PDF.FloatCoords in 'Source\Tests.PDF.FloatCoords.pas',
-  Tests.PDF.PolyPolygon in 'Source\Tests.PDF.PolyPolygon.pas';
+  Tests.PDF.PolyPolygon in 'Source\Tests.PDF.PolyPolygon.pas',
+  Tests.PDF.ClipPath in 'Source\Tests.PDF.ClipPath.pas';
 
 var
   results: TArray<TTestResult>;

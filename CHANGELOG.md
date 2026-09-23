@@ -55,6 +55,15 @@ break source compatibility; they are marked **Breaking**.
   its own start point is no longer split. `DrawPolyline(Points, Count)` strokes
   an open path. `TPDFFillRule = (frEvenOdd, frNonZero)`; non-zero fills emit
   `f` / `B`. The Map demo now uses `DrawPolyPolygon` with unrounded coordinates.
+- Clip stack: `PushClipRect(TRectF | TRect)` / `PopClip` (`q`, `re`, `W n`, and
+  a matching `Q`). Clips still open when a page is written are closed then;
+  `PopClip` with nothing pushed on the current page raises `EPDFError`.
+- Path API: `BeginPath`, `MoveTo`, `LineTo`, `CurveTo`, `ClosePath`,
+  `FillPath(FillRule = frNonZero)`, `StrokePath`, `FillAndStrokePath`, painted
+  with the current Pen / Brush. Drawing, clipping, `NewPage` or saving while a
+  path is open raises `EPDFError`.
+- `DrawRoundRect(R: TRectF; RadiusX, RadiusY)`; radii are clamped to half the
+  rectangle, and a zero radius draws exactly what `DrawBox` draws.
 - `WidthPt`, `HeightPt` — the current page size in points.
 - `Tests/Bench/smPDF_Bench.dpr` — throughput benchmark (1M polygon vertices,
   2,000 outlined labels, A0 at 72 DPI).
