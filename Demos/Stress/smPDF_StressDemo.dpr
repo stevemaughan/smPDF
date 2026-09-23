@@ -462,6 +462,7 @@ var
   bytes: Int64;
   c: TPointF;
   precision: Integer;
+  w, capH: Double;
 begin
   try
     if (ParamCount = 3) and (ParamStr(1) = '--build-cache') then
@@ -560,6 +561,23 @@ begin
       else
         Writeln('  skipped: Ionicons is not installed');
       pdf.PopClip;
+
+      // Translucent trial watermark (W12).
+      pdf.Font.Name := GLabelFont;
+      pdf.Font.Size := 640;
+      pdf.Font.Bold := True;
+      pdf.Font.Color := $000000C0;
+      pdf.Font.StrokeWidth := 0;
+      pdf.Font.Opacity := 0.12;
+      pdf.TextOrigin := toBaseline;
+      // Anchor the rotated baseline so the word's centre lands on the page centre.
+      w := pdf.TextWidthF('TRIAL');
+      capH := pdf.FontMetrics.CapHeight;
+      pdf.DrawText('TRIAL',
+        PAGE_W / 2 - (w / 2) * Cos(DegToRad(30)) + (capH / 2) * Sin(DegToRad(30)),
+        PAGE_H / 2 + (w / 2) * Sin(DegToRad(30)) + (capH / 2) * Cos(DegToRad(30)), 30);
+      pdf.Font.Opacity := 1;
+      pdf.TextOrigin := toGdiTop;
 
       pdf.Pen.Style := penSolid;
       pdf.Pen.Color := $00404040;

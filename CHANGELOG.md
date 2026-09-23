@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-09-23
+
 ### Added
 
 - **Opacity.** `Pen.Opacity`, `Brush.Opacity` and `Font.Opacity` (0 to 1,
@@ -25,6 +27,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `SystemFallbackFonts(Family)` — a ready-made fallback list: the families
   Windows links to `Family` (`FontLink\SystemLink`), then Segoe UI, Microsoft
   YaHei, Yu Gothic, Malgun Gothic and Nirmala UI.
+- The stress demo draws a translucent `TRIAL` watermark.
+
+### Fixed
+
+- `DrawTextOutlines` in a family without a bold (or italic) face could reuse
+  bold outlines for regular text or the reverse; outlines are now cached per
+  requested style.
+- Glyph outlines keep three decimals whatever `CoordinatePrecision` is.
+- Font names containing spaces or PDF delimiters are escaped (`#20`, …)
+  instead of breaking the font dictionary.
+- Fonts with a short OS/2 table or an unset typo ascender use their hhea
+  ascent and descent.
+- Very large CJK subsets (over ~8,000 cmap segments) no longer overflow the
+  embedded cmap's 16-bit lengths.
+- Two fonts sharing a PostScript name get different subset tags.
+- `Save(FileName)` with an open path raises without touching an existing file.
+- A `CreationDate` that falls in a daylight-saving gap no longer fails `Save`.
+- Content buffers larger than 1 GB raise out-of-memory on Win32 instead of
+  looping.
+- A rotated `DrawText` / `DrawTextOutlines` restores the graphics state even if
+  drawing raises.
 
 ## [2.0.0] — 2026-09-23
 

@@ -1,11 +1,11 @@
 # smPDF — pure-Pascal PDF export library for Delphi
 
-![Version 2.0.0](https://img.shields.io/badge/version-2.0.0-blue.svg)
+![Version 2.1.0](https://img.shields.io/badge/version-2.1.0-blue.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Delphi 10.1 Berlin+](https://img.shields.io/badge/Delphi-10.1%20Berlin%2B-red.svg)
 ![PDF 1.4](https://img.shields.io/badge/PDF-1.4-blue.svg)
 ![Platform: Windows Win32 / Win64](https://img.shields.io/badge/platform-Win32%20%7C%20Win64-lightgrey.svg)
-![Tests: 418 passing](https://img.shields.io/badge/tests-418%20passing-brightgreen.svg)
+![Tests: 443 passing](https://img.shields.io/badge/tests-443%20passing-brightgreen.svg)
 ![Dependencies: zero](https://img.shields.io/badge/dependencies-zero-success.svg)
 
 A self-contained library for generating PDF files from Delphi 10.1 Berlin or
@@ -54,7 +54,9 @@ end;
   stays searchable and copyable
 - **Map labels**: GDI-compatible metrics (`TextOrigin = toGdiTop`), halos drawn
   under the fill, text drawn as vector outlines (`DrawTextOutlines`, for icon
-  fonts such as Ionicons), rotation at any angle
+  fonts such as Ionicons), rotation at any angle, fallback fonts for
+  characters the main font lacks
+- **Transparency**: `Opacity` on Pen, Brush and Font
 - **Layout**: `DrawText` at a point or fitted to a rectangle, `DrawParagraph`
   with word wrap (breaks between CJK characters too), underline, text
   background
@@ -140,9 +142,9 @@ Everything is in `uses smPDF`. Types:
 | Type | Purpose |
 |---|---|
 | `TsmPDF` | The document: pages, drawing, text, measurement, saving |
-| `TPDFFont` | `Name`, `Size` (`Double`), `Color`, `Bold`, `Italics`, `Underline`, `StrokeColor`, `StrokeStyle`, `StrokeWidth`, `StrokeMode` |
-| `TPDFPen` | `Color`, `Width`, `Style` (penSolid/Dash/Dot/DashDot/None), `LineCap`, `LineJoin` |
-| `TPDFBrush` | `Color`, `Style` (brushSolid / brushClear). When solid, also paints a background behind `DrawText` / `DrawParagraph` |
+| `TPDFFont` | `Name`, `Size` (`Double`), `Color`, `Bold`, `Italics`, `Underline`, `StrokeColor`, `StrokeStyle`, `StrokeWidth`, `StrokeMode`, `Opacity`, `FallbackFonts` |
+| `TPDFPen` | `Color`, `Width`, `Style` (penSolid/Dash/Dot/DashDot/None), `LineCap`, `LineJoin`, `Opacity` |
+| `TPDFBrush` | `Color`, `Style` (brushSolid / brushClear), `Opacity`. When solid, also paints a background behind `DrawText` / `DrawParagraph` |
 | `TPDFFillRule` | `frEvenOdd`, `frNonZero` |
 | `TPDFTextOrigin` | `toTypoTop`, `toGdiTop`, `toBaseline` — what the Y of `DrawText(X, Y)` means |
 | `TPDFStrokeMode` | `smOverFill`, `smUnderFill` — outline over the glyphs, or a halo under them |
@@ -150,6 +152,7 @@ Everything is in `uses smPDF`. Types:
 | `TPDFPointList` / `TPDFPointFList` | `TList<TPoint>` / `TList<TPointF>` |
 | `TPDFOrientation`, `TPDFPaperSize`, `TPDFPenStyle`, `TPDFBrushStyle`, `TPDFTextPadding`, `TPDFStrokeStyle`, `TPDFLineCap`, `TPDFLineJoin` | as their names say |
 | `EPDFError` | The single exception class the library raises |
+| `SystemFallbackFonts(Family)` | A ready-made value for `Font.FallbackFonts` |
 
 Pages and output:
 
@@ -356,6 +359,26 @@ These fall back to Helvetica and add a line to `pdf.Warnings`:
 `DrawTextOutlines` can still draw the last two, because it draws outlines
 rather than embedding the font.
 
+### Fallback fonts
+
+A label font such as Oswald has no Chinese glyphs. `Font.FallbackFonts` lists
+families to use for characters the main font lacks:
+
+```pascal
+pdf.Font.Name          := 'Oswald';
+pdf.Font.FallbackFonts := 'Microsoft YaHei;Yu Gothic;Malgun Gothic';
+pdf.DrawText('Beijing 北京', X, Y);   // "Beijing " in Oswald, "北京" in YaHei
+```
+
+The text is split into runs, each drawn in the first font (the main one first)
+that has its characters, one after another on the same baseline. Every
+measuring function adds the runs up, so `TextWidth`, alignment and wrapping
+stay right. `SystemFallbackFonts('Oswald')` returns a sensible list: the fonts
+Windows itself links to that family, then Segoe UI, Microsoft YaHei, Yu Gothic,
+Malgun Gothic and Nirmala UI. With `FallbackFonts` empty (the default), a
+missing character is drawn as the main font's missing-glyph box and warned
+about.
+
 ## Encoding
 
 Text is Unicode. What can be drawn depends on the font:
@@ -385,6 +408,20 @@ the full Unicode line-breaking algorithm.
 
 In Delphi source files, save non-ASCII literals as UTF-8 **with a BOM**, or
 write them as escapes (`#$0141` for `Ł`); a file without a BOM is read as ANSI.
+
+## Transparency
+
+`Pen.Opacity`, `Brush.Opacity` and `Font.Opacity` run from 0 (invisible) to 1
+(opaque, the default). Shapes use the Pen's opacity for their outline and the
+Brush's for their fill; text uses `Font.Opacity` for its fill and halo.
+
+```pascal
+pdf.Font.Size    := 120;
+pdf.Font.Color   := clRed;
+pdf.Font.Opacity := 0.15;
+pdf.DrawText('TRIAL', 150, 500, 30);   // a translucent watermark
+pdf.Font.Opacity := 1;
+```
 
 ## Document information and warnings
 

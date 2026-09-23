@@ -11,7 +11,7 @@ uses
 const
   // SemVer string, bumped per https://semver.org/. Read at runtime via
   // SMPDF_VERSION; useful for diagnostics, About boxes, and bug reports.
-  SMPDF_VERSION = '2.0.0';
+  SMPDF_VERSION = '2.1.0';
 
 type
   EPDFError = class(Exception);
