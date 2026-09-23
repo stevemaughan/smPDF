@@ -49,11 +49,8 @@ const
   VIETNAMESE = 'H'#$00E0' N'#$1ED9'i';
 
 procedure TUnicodeTests.RequireFont(const AFamily: string);
-var
-  data: TBytes;
-  face: string;
 begin
-  if not GdiLoadFontData(AFamily, False, False, data, face) then
+  if not GdiFontInstalled(AFamily) then
     Skip(AFamily + ' is not installed');
 end;
 

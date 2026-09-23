@@ -104,6 +104,8 @@ type
 
     function HasTable(const ATag: AnsiString): Boolean;
     function TableData(const ATag: AnsiString): TBytes;
+    // Where a table sits inside Bytes, without copying it.
+    function TableRange(const ATag: AnsiString; out AOffset, ALength: Cardinal): Boolean;
     function TableTags: TArray<AnsiString>;
 
     function GlyphIndex(ACodepoint: Cardinal): Word;  // 0 if missing
@@ -143,6 +145,15 @@ type
 // Assemble a standalone TrueType file from tables: sorted directory, 4-byte
 // padding, per-table checksums and head.checkSumAdjustment.
 function BuildSfnt(const ATables: array of TSfntTable): TBytes;
+
+// The same in two steps, for callers that write table data straight into the
+// file: SfntLayout sorts ATags (with ALengths) and returns each table's offset
+// and the file size; once the data is in place, SfntFinish writes the header,
+// directory and checksums.
+function SfntLayout(var ATags: TArray<AnsiString>; var ALengths: TArray<Cardinal>;
+  out AOffsets: TArray<Cardinal>): Cardinal;
+procedure SfntFinish(var AData: TBytes; const ATags: TArray<AnsiString>;
+  const AOffsets, ALengths: TArray<Cardinal>);
 
 // The sfnt checksum: sum of big-endian 32-bit words, zero-padded.
 function SfntChecksum(const AData: TBytes; AOffset, ALength: Integer): Cardinal;
@@ -260,6 +271,23 @@ begin
   if Int64(e.Offset) + e.Length > Length(fBytes) then
     raise ETTFParseError.CreateFmt('Table "%s" runs past EOF in %s', [string(ATag), fSourceLabel]);
   Result := Copy(fBytes, e.Offset, e.Length);
+end;
+
+function TTTFFont.TableRange(const ATag: AnsiString; out AOffset, ALength: Cardinal): Boolean;
+var
+  e: TTTFTableEntry;
+begin
+  Result := fTables.TryGetValue(ATag, e) and (Int64(e.Offset) + e.Length <= Length(fBytes));
+  if Result then
+  begin
+    AOffset := e.Offset;
+    ALength := e.Length;
+  end
+  else
+  begin
+    AOffset := 0;
+    ALength := 0;
+  end;
 end;
 
 function TTTFFont.TableTags: TArray<AnsiString>;
@@ -827,29 +855,45 @@ begin
   ABuf[AOffset + 3] := Byte(AValue);
 end;
 
-function BuildSfnt(const ATables: array of TSfntTable): TBytes;
+function SfntLayout(var ATags: TArray<AnsiString>; var ALengths: TArray<Cardinal>;
+  out AOffsets: TArray<Cardinal>): Cardinal;
 var
-  tables: TArray<TSfntTable>;
-  i, n, pow2, log2, total, off, headOff: Integer;
-  checksums: array of Cardinal;
-  offsets: array of Integer;
-  table: TSfntTable;
-  isCFF: Boolean;
+  i, j, n: Integer;
+  tag: AnsiString;
+  len: Cardinal;
 begin
-  n := Length(ATables);
-  SetLength(tables, n);
-  isCFF := False;
+  n := Length(ATags);
+  // Insertion sort by tag keeps tags and lengths paired.
+  for i := 1 to n - 1 do
+  begin
+    tag := ATags[i];
+    len := ALengths[i];
+    j := i - 1;
+    while (j >= 0) and (CompareStr(string(ATags[j]), string(tag)) > 0) do
+    begin
+      ATags[j + 1] := ATags[j];
+      ALengths[j + 1] := ALengths[j];
+      Dec(j);
+    end;
+    ATags[j + 1] := tag;
+    ALengths[j + 1] := len;
+  end;
+  SetLength(AOffsets, n);
+  Result := 12 + 16 * n;
   for i := 0 to n - 1 do
   begin
-    tables[i] := ATables[i];
-    if tables[i].Tag = 'CFF ' then isCFF := True;
+    AOffsets[i] := Result;
+    Inc(Result, (ALengths[i] + 3) and not 3);
   end;
-  TArray.Sort<TSfntTable>(tables, TComparer<TSfntTable>.Construct(
-    function(const A, B: TSfntTable): Integer
-    begin
-      Result := CompareStr(string(A.Tag), string(B.Tag));
-    end));
+end;
 
+procedure SfntFinish(var AData: TBytes; const ATags: TArray<AnsiString>;
+  const AOffsets, ALengths: TArray<Cardinal>);
+var
+  i, n, pow2, log2, headOff: Integer;
+  isCFF: Boolean;
+begin
+  n := Length(ATags);
   pow2 := 1;
   log2 := 0;
   while pow2 * 2 <= n do
@@ -857,50 +901,59 @@ begin
     pow2 := pow2 * 2;
     Inc(log2);
   end;
-
-  total := 12 + 16 * n;
-  SetLength(offsets, n);
-  SetLength(checksums, n);
+  isCFF := False;
   headOff := -1;
   for i := 0 to n - 1 do
-  begin
-    offsets[i] := total;
-    Inc(total, (Length(tables[i].Data) + 3) and not 3);
-  end;
-
-  SetLength(Result, total);
-  FillChar(Result[0], total, 0);
-  if isCFF then PutU32(Result, 0, SFNT_OTTO) else PutU32(Result, 0, TTF_VERSION_TRUE);
-  PutU16(Result, 4, n);
-  PutU16(Result, 6, pow2 * 16);
-  PutU16(Result, 8, log2);
-  PutU16(Result, 10, n * 16 - pow2 * 16);
-
+    if ATags[i] = 'CFF ' then isCFF := True;
+  if isCFF then PutU32(AData, 0, SFNT_OTTO) else PutU32(AData, 0, TTF_VERSION_TRUE);
+  PutU16(AData, 4, n);
+  PutU16(AData, 6, pow2 * 16);
+  PutU16(AData, 8, log2);
+  PutU16(AData, 10, n * 16 - pow2 * 16);
   for i := 0 to n - 1 do
   begin
-    table := tables[i];
-    off := offsets[i];
-    if Length(table.Data) > 0 then
-      Move(table.Data[0], Result[off], Length(table.Data));
-    if table.Tag = 'head' then
+    if (ATags[i] = 'head') and (ALengths[i] >= 12) then
     begin
-      headOff := off;
-      if Length(table.Data) >= 12 then
-        PutU32(Result, off + 8, 0);  // checkSumAdjustment is zero while summing
+      headOff := AOffsets[i];
+      PutU32(AData, headOff + 8, 0);  // checkSumAdjustment is zero while summing
     end;
-    checksums[i] := SfntChecksum(Result, off, Length(table.Data));
-
-    Result[12 + i * 16]     := Ord(table.Tag[1]);
-    Result[12 + i * 16 + 1] := Ord(table.Tag[2]);
-    Result[12 + i * 16 + 2] := Ord(table.Tag[3]);
-    Result[12 + i * 16 + 3] := Ord(table.Tag[4]);
-    PutU32(Result, 12 + i * 16 + 4, checksums[i]);
-    PutU32(Result, 12 + i * 16 + 8, off);
-    PutU32(Result, 12 + i * 16 + 12, Length(table.Data));
+    AData[12 + i * 16]     := Ord(ATags[i][1]);
+    AData[12 + i * 16 + 1] := Ord(ATags[i][2]);
+    AData[12 + i * 16 + 2] := Ord(ATags[i][3]);
+    AData[12 + i * 16 + 3] := Ord(ATags[i][4]);
+    PutU32(AData, 12 + i * 16 + 4, SfntChecksum(AData, AOffsets[i], ALengths[i]));
+    PutU32(AData, 12 + i * 16 + 8, AOffsets[i]);
+    PutU32(AData, 12 + i * 16 + 12, ALengths[i]);
   end;
-
   if headOff >= 0 then
-    PutU32(Result, headOff + 8, $B1B0AFBA - SfntChecksum(Result, 0, total));
+    PutU32(AData, headOff + 8, $B1B0AFBA - SfntChecksum(AData, 0, Length(AData)));
+end;
+
+function BuildSfnt(const ATables: array of TSfntTable): TBytes;
+var
+  tags: TArray<AnsiString>;
+  lengths, offsets: TArray<Cardinal>;
+  i, k: Integer;
+  total: Cardinal;
+begin
+  SetLength(tags, Length(ATables));
+  SetLength(lengths, Length(ATables));
+  for i := 0 to High(ATables) do
+  begin
+    tags[i] := ATables[i].Tag;
+    lengths[i] := Length(ATables[i].Data);
+  end;
+  total := SfntLayout(tags, lengths, offsets);
+  SetLength(Result, total);
+  FillChar(Result[0], total, 0);
+  for i := 0 to High(tags) do
+    for k := 0 to High(ATables) do
+      if (ATables[k].Tag = tags[i]) and (Length(ATables[k].Data) > 0) then
+      begin
+        Move(ATables[k].Data[0], Result[offsets[i]], Length(ATables[k].Data));
+        Break;
+      end;
+  SfntFinish(Result, tags, offsets, lengths);
 end;
 
 end.

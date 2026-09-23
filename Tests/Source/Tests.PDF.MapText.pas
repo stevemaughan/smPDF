@@ -48,11 +48,8 @@ uses
   StrUtils, Generics.Collections, Vcl.Graphics, smPDF, smPDF.GdiFonts;
 
 procedure TMapTextTests.RequireFont(const AFamily: string);
-var
-  data: TBytes;
-  face: string;
 begin
-  if not GdiLoadFontData(AFamily, False, False, data, face) then
+  if not GdiFontInstalled(AFamily) then
     Skip(AFamily + ' is not installed');
 end;
 

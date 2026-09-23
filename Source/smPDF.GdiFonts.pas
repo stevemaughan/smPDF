@@ -47,6 +47,9 @@ type
     property FaceName: string read fFaceName;
   end;
 
+// True when GDI has a TrueType/OpenType family of this name (no data is read).
+function GdiFontInstalled(const AFamily: string): Boolean;
+
 // Load the face GDI selects for (AFamily, ABold, AItalic) as a standalone
 // TrueType/OpenType file rebuilt from its tables. Returns False when the
 // family is not installed (GDI would have substituted another font).
@@ -287,14 +290,27 @@ begin
   end;
 end;
 
+function GdiFontInstalled(const AFamily: string): Boolean;
+var
+  ctx: TGdiFontContext;
+begin
+  if Trim(AFamily) = '' then Exit(False);
+  ctx := TGdiFontContext.Create(AFamily, False, False, 16);
+  try
+    Result := ctx.MatchesFamily(AFamily);
+  finally
+    ctx.Free;
+  end;
+end;
+
 function GdiLoadFontData(const AFamily: string; ABold, AItalic: Boolean;
   out AData: TBytes; out AFaceName: string): Boolean;
 var
   ctx: TGdiFontContext;
-  tags: TArray<AnsiString>;
-  tables: TList<TSfntTable>;
-  tag: AnsiString;
-  data: TBytes;
+  allTags, tags: TArray<AnsiString>;
+  lengths, offsets: TArray<Cardinal>;
+  size, total: Cardinal;
+  i, n: Integer;
 begin
   AData := nil;
   AFaceName := '';
@@ -306,25 +322,37 @@ begin
     AFaceName := ctx.FaceName;
     if not ctx.MatchesFamily(AFamily) then Exit;
 
-    tags := ctx.TableTags;
-    if Length(tags) = 0 then Exit;
-
-    tables := TList<TSfntTable>.Create;
-    try
-      for tag in tags do
-      begin
-        // The digital signature no longer matches a rebuilt file.
-        if tag = 'DSIG' then Continue;
-        data := ctx.TableData(tag);
-        if data <> nil then
-          tables.Add(TSfntTable.Create(tag, data));
-      end;
-      if tables.Count = 0 then Exit;
-      AData := BuildSfnt(tables.ToArray);
-      Result := True;
-    finally
-      tables.Free;
+    allTags := ctx.TableTags;
+    SetLength(tags, Length(allTags));
+    SetLength(lengths, Length(allTags));
+    n := 0;
+    for i := 0 to High(allTags) do
+    begin
+      // The digital signature no longer matches a rebuilt file.
+      if allTags[i] = 'DSIG' then Continue;
+      size := GetFontData(ctx.DC, TagToDWord(allTags[i]), 0, nil, 0);
+      if (size = GDI_ERROR) or (size = 0) then Continue;
+      tags[n] := allTags[i];
+      lengths[n] := size;
+      Inc(n);
     end;
+    if n = 0 then Exit;
+    SetLength(tags, n);
+    SetLength(lengths, n);
+
+    // Each table is read straight into its place in the rebuilt file, so a
+    // large font is never held twice.
+    total := SfntLayout(tags, lengths, offsets);
+    SetLength(AData, total);
+    FillChar(AData[0], total, 0);
+    for i := 0 to n - 1 do
+      if GetFontData(ctx.DC, TagToDWord(tags[i]), 0, @AData[offsets[i]], lengths[i]) <> lengths[i] then
+      begin
+        AData := nil;
+        Exit;
+      end;
+    SfntFinish(AData, tags, offsets, lengths);
+    Result := True;
   finally
     ctx.Free;
   end;

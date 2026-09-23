@@ -89,12 +89,16 @@ function BuildGlyfAndLoca(ATTF: TTTFFont; const AKeep: TArray<Word>;
   out AGlyf, ALoca: TBytes): Boolean;
 var
   src: TBytes;
+  glyfStart, glyfLength: Cardinal;
   keep: array of Boolean;
   gid, n: Integer;
   offset, len, glyfSize: Cardinal;
   cur: Cardinal;
 begin
-  src := ATTF.TableData('glyf');
+  // Read outlines from the font file itself; copying glyf would double the
+  // memory for a large CJK font.
+  src := ATTF.Bytes;
+  ATTF.TableRange('glyf', glyfStart, glyfLength);
   n := ATTF.Metrics.NumGlyphs;
   SetLength(keep, n);
   for gid in AKeep do
@@ -114,8 +118,8 @@ begin
     PutU32(ALoca, gid * 4, cur);
     if keep[gid] and ATTF.GlyphRange(gid, offset, len) then
     begin
-      if Int64(offset) + len <= Length(src) then
-        Move(src[offset], AGlyf[cur], len);
+      if Int64(offset) + len <= glyfLength then
+        Move(src[glyfStart + offset], AGlyf[cur], len);
       Inc(cur, (len + 3) and not 3);
     end;
   end;
