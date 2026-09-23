@@ -211,7 +211,7 @@ begin
   if not GdiLoadFontData('Calibri Light', False, False, data, face) then
     Skip('Calibri Light is not installed');
   s := BuildWith('Calibri Light', True);
-  AssertContains('/BaseFont /Calibri-Light', s);
+  AssertContains('+Calibri-Light', s);
   AssertContains('0 0 0 RG', s, 'stroke in the fill colour');
   AssertContains('0.36 w', s, '0.03 em at 12 pt');
   AssertContains('2 Tr', s);
@@ -226,7 +226,7 @@ begin
   if not GdiLoadFontData('Arial', True, False, data, face) then
     Skip('Arial is not installed');
   s := BuildWith('Arial', True);
-  AssertContains('/BaseFont /Arial-BoldMT', s);
+  AssertContains('+Arial-BoldMT', s);
   AssertEquals(0, Pos(' Tr', s), 'a real bold face needs no emboldening');
 end;
 

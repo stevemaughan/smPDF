@@ -21,7 +21,8 @@ uses
   Tests.PDF.Compression in 'Source\Tests.PDF.Compression.pas',
   Tests.PDF.FloatCoords in 'Source\Tests.PDF.FloatCoords.pas',
   Tests.PDF.PolyPolygon in 'Source\Tests.PDF.PolyPolygon.pas',
-  Tests.PDF.ClipPath in 'Source\Tests.PDF.ClipPath.pas';
+  Tests.PDF.ClipPath in 'Source\Tests.PDF.ClipPath.pas',
+  Tests.PDF.Subset in 'Source\Tests.PDF.Subset.pas';
 
 var
   results: TArray<TTestResult>;

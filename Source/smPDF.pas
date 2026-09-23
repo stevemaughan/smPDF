@@ -143,7 +143,7 @@ type
     function GetWarnings: TStrings;
 
     procedure WriteDocument(AWriter: TPDFWriter);
-    function EmitTrueTypeFont(AWriter: TPDFWriter; ATTF: TTTFFont): TPDFObjectId;
+    function EmitTrueTypeFont(AWriter: TPDFWriter; AFace: TPDFFontFace): TPDFObjectId;
     function EmitStandardFont(AWriter: TPDFWriter; AFont: TStandardFont): TPDFObjectId;
     function EmitImageObject(AWriter: TPDFWriter; const AData: TPDFImageData): TPDFObjectId;
     function GetOrAddImage(APicture: TPicture): string;
@@ -282,7 +282,7 @@ type
 implementation
 
 uses
-  System.Math, smPDF.Geometry, smPDF.Types;
+  System.Math, smPDF.Geometry, smPDF.Types, smPDF.Subset;
 
 { TPDFFont }
 
@@ -436,24 +436,70 @@ begin
   AWriter.EndObject;
 end;
 
-function TsmPDF.EmitTrueTypeFont(AWriter: TPDFWriter; ATTF: TTTFFont): TPDFObjectId;
+procedure RecordWinAnsiGlyphs(AFace: TPDFFontFace; const AAnsi: AnsiString);
 var
+  i: Integer;
+  cp: Cardinal;
+  gid: Word;
+begin
+  for i := 1 to Length(AAnsi) do
+  begin
+    cp := WinAnsiToUnicode(Byte(AAnsi[i]));
+    gid := AFace.TTF.GlyphIndex(cp);
+    if gid <> 0 then
+      AFace.RecordGlyph(gid, cp);
+  end;
+end;
+
+// The embedded font program: a hollow subset carrying only the glyphs drawn,
+// or the whole font when its fsType forbids subsetting.
+function EmbeddedFontProgram(AFace: TPDFFontFace; out AFontName: string): TBytes;
+var
+  used: TArray<Word>;
+  charMap: TArray<TSubsetCharMapping>;
+  i: Integer;
+  ttf: TTTFFont;
+begin
+  ttf := AFace.TTF;
+  if ttf.SubsettingForbidden then
+  begin
+    AFontName := ttf.Metrics.PostScriptName;
+    Exit(ttf.Bytes);
+  end;
+  used := AFace.UsedGlyphs;
+  SetLength(charMap, Length(used));
+  for i := 0 to High(used) do
+  begin
+    charMap[i].GlyphId   := used[i];
+    charMap[i].Codepoint := AFace.UsedGlyphCodepoint(used[i]);
+  end;
+  AFontName := MakeSubsetTag(ttf.Metrics.PostScriptName, SubsetGlyphClosure(ttf, used)) +
+    '+' + ttf.Metrics.PostScriptName;
+  Result := BuildHollowSubset(ttf, used, charMap, AFontName);
+end;
+
+function TsmPDF.EmitTrueTypeFont(AWriter: TPDFWriter; AFace: TPDFFontFace): TPDFObjectId;
+var
+  ATTF: TTTFFont;
   m: TTTFFontMetrics;
   fontFileId, descriptorId: TPDFObjectId;
   i: Integer;
-  payload: TBytes;
+  program_, payload: TBytes;
+  fontName: string;
   rawLength: Integer;
   compress: Boolean;
 begin
+  ATTF := AFace.TTF;
   m := ATTF.Metrics;
+  program_ := EmbeddedFontProgram(AFace, fontName);
 
   // FontFile2 — embedded TTF stream; /Length1 is always the uncompressed length
-  rawLength := Length(ATTF.Bytes);
+  rawLength := Length(program_);
   compress  := fCompressStreams;
   if compress then
-    payload := FlateCompress(ATTF.Bytes)
+    payload := FlateCompress(program_)
   else
-    payload := ATTF.Bytes;
+    payload := program_;
   fontFileId := AWriter.EmitStreamObject(payload,
     procedure(w: TPDFWriter)
     begin
@@ -468,7 +514,7 @@ begin
   descriptorId := AWriter.BeginObject;
     AWriter.BeginDict;
       AWriter.WriteName('Type');     AWriter.WriteName('FontDescriptor');
-      AWriter.WriteName('FontName'); AWriter.WriteName(m.PostScriptName);
+      AWriter.WriteName('FontName'); AWriter.WriteName(fontName);
       AWriter.WriteName('Flags');    AWriter.WriteInt(Integer(m.PdfFlags));
 
       AWriter.WriteName('FontBBox');
@@ -493,7 +539,7 @@ begin
     AWriter.BeginDict;
       AWriter.WriteName('Type');           AWriter.WriteName('Font');
       AWriter.WriteName('Subtype');        AWriter.WriteName('TrueType');
-      AWriter.WriteName('BaseFont');       AWriter.WriteName(m.PostScriptName);
+      AWriter.WriteName('BaseFont');       AWriter.WriteName(fontName);
       AWriter.WriteName('Encoding');       AWriter.WriteName('WinAnsiEncoding');
       AWriter.WriteName('FirstChar');      AWriter.WriteInt(32);
       AWriter.WriteName('LastChar');       AWriter.WriteInt(255);
@@ -689,7 +735,7 @@ begin
       if face.IsStandard then
         fontId := EmitStandardFont(writer, face.StdFont)
       else
-        fontId := EmitTrueTypeFont(writer, face.TTF);
+        fontId := EmitTrueTypeFont(writer, face);
       fontIds.Add(pageFontName, fontId);
     end;
 
@@ -1265,6 +1311,8 @@ begin
   resName  := fCurrentPage.UseFont(resolved.Face.Key);
 
   ansi := StringToWinAnsi(AText);
+  if not resolved.Face.IsStandard then
+    RecordWinAnsiGlyphs(resolved.Face, ansi);
 
   baselineYPx := Y + PtToPx(FontAscentPt(resolved, sizePt));
 

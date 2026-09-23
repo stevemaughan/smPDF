@@ -54,6 +54,13 @@ break source compatibility; they are marked **Breaking**.
   documents on different threads no longer share state. Loading a font once per
   document instead of once per `DrawText` makes labelled pages far faster.
 - `TPDFResolvedFont` is no longer part of the public interface.
+- **Embedded TrueType fonts are subset.** Only the glyphs actually drawn (plus
+  composite-glyph components and `.notdef`) carry outlines; glyph ids are kept,
+  so metrics stay valid. Layout tables (`GSUB`, `GPOS`, `kern`, …) are dropped;
+  hinting tables are kept. Fonts are named `ABCDEF+PostScriptName`, the tag
+  derived from the glyph set. A page of Arial text now carries ~20 KB of font
+  data instead of ~1 MB; the Showcase demo drops from 10.3 MB to 0.19 MB. Fonts
+  whose `fsType` forbids subsetting are still embedded whole.
 
 ### Removed
 

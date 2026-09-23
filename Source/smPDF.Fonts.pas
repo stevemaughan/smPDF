@@ -67,6 +67,11 @@ function StandardFontLineHeight(AFont: TStandardFont; ASizePoints: Double): Doub
 // Code points not in WinAnsi become the literal '?' (0x3F).
 function StringToWinAnsi(const AText: string): AnsiString;
 
+// The Unicode code point a WinAnsi byte stands for (0 for the five unused bytes).
+function WinAnsiToUnicode(AByte: Byte): Cardinal;
+// The WinAnsi byte for a code point; False when WinAnsi has no such character.
+function UnicodeToWinAnsi(ACodepoint: Cardinal; out AByte: Byte): Boolean;
+
 implementation
 
 uses
@@ -274,6 +279,40 @@ end;
 function StandardFontLineHeight(AFont: TStandardFont; ASizePoints: Double): Double;
 begin
   Result := 1.2 * ASizePoints;
+end;
+
+const
+  WINANSI_80_9F: array[$80..$9F] of Word = (
+    $20AC, $0000, $201A, $0192, $201E, $2026, $2020, $2021,
+    $02C6, $2030, $0160, $2039, $0152, $0000, $017D, $0000,
+    $0000, $2018, $2019, $201C, $201D, $2022, $2013, $2014,
+    $02DC, $2122, $0161, $203A, $0153, $0000, $017E, $0178);
+
+function WinAnsiToUnicode(AByte: Byte): Cardinal;
+begin
+  if (AByte >= $80) and (AByte <= $9F) then
+    Result := WINANSI_80_9F[AByte]
+  else
+    Result := AByte;
+end;
+
+function UnicodeToWinAnsi(ACodepoint: Cardinal; out AByte: Byte): Boolean;
+var
+  b: Integer;
+begin
+  AByte := Ord('?');
+  if (ACodepoint < $80) or ((ACodepoint >= $A0) and (ACodepoint <= $FF)) then
+  begin
+    AByte := Byte(ACodepoint);
+    Exit(True);
+  end;
+  for b := $80 to $9F do
+    if (WINANSI_80_9F[b] <> 0) and (WINANSI_80_9F[b] = ACodepoint) then
+    begin
+      AByte := Byte(b);
+      Exit(True);
+    end;
+  Result := False;
 end;
 
 function StringToWinAnsi(const AText: string): AnsiString;

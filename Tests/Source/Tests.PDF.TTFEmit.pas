@@ -26,7 +26,7 @@ type
 implementation
 
 uses
-  StrUtils, IOUtils, Vcl.Graphics, smPDF;
+  StrUtils, IOUtils, RegularExpressions, Vcl.Graphics, smPDF;
 
 function TTTFEmitTests.SavedAsString(const ABuild: TProc<TObject>): string;
 var
@@ -117,11 +117,9 @@ begin
     TsmPDF(o).Font.Name := 'Arial';
     TsmPDF(o).DrawText('Hello', 100, 100);
   end);
-  // Arial's PostScript name is 'ArialMT' on most systems. Accept either form.
-  AssertTrue(
-    (Pos('/BaseFont /ArialMT', s) > 0) or
-    (Pos('/BaseFont /Arial',   s) > 0),
-    '/BaseFont should be the embedded font''s PostScript name');
+  // A subset is named TAG+PostScriptName, the tag being six capital letters.
+  AssertTrue(TRegEx.IsMatch(s, '/BaseFont /[A-Z]{6}\+ArialMT'),
+    '/BaseFont should be the subset tag plus the PostScript name');
 end;
 
 procedure TTTFEmitTests.Test_Arial_widthsArrayHas224Entries;

@@ -20,12 +20,21 @@ type
     fGdiFamily:   string;
     fGdiBold:     Boolean;
     fGdiItalic:   Boolean;
+    fUsedGlyphs:  TDictionary<Word, Cardinal>;  // glyph id -> first code point drawn with it
   public
     constructor CreateStandard(AFont: TStandardFont);
     // Takes ownership of ATTF.
     constructor CreateTrueType(ATTF: TTTFFont; const AKey, AGdiFamily: string;
       AGdiBold, AGdiItalic: Boolean);
     destructor Destroy; override;
+
+    // Note that AGlyph was drawn for ACodepoint. The first code point seen for
+    // a glyph is the one text extraction will report.
+    procedure RecordGlyph(AGlyph: Word; ACodepoint: Cardinal);
+    // Glyph ids drawn so far, ascending.
+    function UsedGlyphs: TArray<Word>;
+    function UsedGlyphCodepoint(AGlyph: Word): Cardinal;
+    function HasUsedGlyphs: Boolean;
 
     // Unique within a document; used as the page resource key.
     property Key:        string        read fKey;
@@ -106,8 +115,35 @@ end;
 
 destructor TPDFFontFace.Destroy;
 begin
+  fUsedGlyphs.Free;
   fTTF.Free;
   inherited;
+end;
+
+procedure TPDFFontFace.RecordGlyph(AGlyph: Word; ACodepoint: Cardinal);
+begin
+  if fUsedGlyphs = nil then
+    fUsedGlyphs := TDictionary<Word, Cardinal>.Create;
+  if not fUsedGlyphs.ContainsKey(AGlyph) then
+    fUsedGlyphs.Add(AGlyph, ACodepoint);
+end;
+
+function TPDFFontFace.UsedGlyphs: TArray<Word>;
+begin
+  if fUsedGlyphs = nil then Exit(nil);
+  Result := fUsedGlyphs.Keys.ToArray;
+  TArray.Sort<Word>(Result);
+end;
+
+function TPDFFontFace.UsedGlyphCodepoint(AGlyph: Word): Cardinal;
+begin
+  if (fUsedGlyphs = nil) or not fUsedGlyphs.TryGetValue(AGlyph, Result) then
+    Result := 0;
+end;
+
+function TPDFFontFace.HasUsedGlyphs: Boolean;
+begin
+  Result := (fUsedGlyphs <> nil) and (fUsedGlyphs.Count > 0);
 end;
 
 { TPDFFontRegistry }

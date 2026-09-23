@@ -1,5 +1,9 @@
 unit smPDF.TTF;
 
+// Checksums and hashes rely on 32-bit wrap-around.
+{$OVERFLOWCHECKS OFF}
+{$RANGECHECKS OFF}
+
 interface
 
 uses
